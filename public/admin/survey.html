@@ -1,0 +1,40 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Edit survey · Tenant Consulting</title><link rel="icon" href="/img/favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Libre+Caslon+Text&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/vendor/leaflet/leaflet.css">
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/admin.css"></head>
+<body>
+<header class="brandbar"><a class="logo" href="/admin"><img src="/img/logo.svg" alt="Tenant Consulting"></a><a class="navlink" href="/admin">← All surveys</a><span class="spacer"></span>
+<form method="post" action="/admin/logout"><button class="btn small">Log out</button></form></header>
+<main class="wrap" style="max-width:1400px">
+  <div id="banner"></div>
+  <div class="ed-head">
+    <div class="meta" style="flex:1;min-width:280px">
+      <input id="title" aria-label="Survey title"><br>
+      <input id="client" class="client" placeholder="Client name" aria-label="Client name">
+      <div class="muted" style="font-size:12.5px;margin-top:4px" id="srcLine"></div>
+    </div>
+    <div class="panel linkbox">
+      <div style="font-weight:600;color:var(--navy)">Client's private link</div>
+      <div class="copyrow"><input id="link" readonly><button class="btn small primary" id="copyBtn">Copy</button><a class="btn small" id="openBtn" target="_blank" style="text-decoration:none">Open</a></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn small" id="rotateBtn" title="Old link stops working">New link</button>
+        <button class="btn small" id="resetBtn">Clear votes</button>
+        <button class="btn small danger" id="deleteBtn">Delete survey</button>
+      </div>
+    </div>
+  </div>
+  <section class="panel results" id="results"></section>
+  <div class="ed-body">
+    <div>
+      <div class="sub" style="margin-top:0"><span>Buildings · check and edit what was pulled from the PDF</span><button class="btn small" id="addBld">+ Add building</button></div>
+      <div id="blds"></div>
+    </div>
+    <div class="ed-map"><div id="map"></div><div class="hint" id="hint" hidden></div></div>
+  </div>
+</main>
+<script src="/vendor/leaflet/leaflet.js"></script>
+<script src="/config.js"></script>
+<script src="/js/admin-common.js"></script>
+<script src="/js/admin-survey.js"></script>
+</body></html>

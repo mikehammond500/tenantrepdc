@@ -1,0 +1,54 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Surveys · Tenant Consulting</title><link rel="icon" href="/img/favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Libre+Caslon+Text&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css"><link rel="stylesheet" href="/css/admin.css"></head>
+<body>
+<header class="brandbar"><a class="logo" href="/admin"><img src="/img/logo.svg" alt="Tenant Consulting"></a><span class="spacer"></span>
+<form method="post" action="/admin/logout"><button class="btn small">Log out</button></form></header>
+<main class="wrap">
+  <h1 class="page">Property surveys</h1>
+  <p class="muted" style="margin-top:0">Upload a CoStar report to create a private map survey for a client.</p>
+  <form class="panel grid-form" id="newForm" style="margin:16px 0 26px">
+    <label>Survey title<input name="title" placeholder="e.g. Loudoun Office Options, Dec 2026"></label>
+    <label>Client<input name="client_name" placeholder="e.g. Acme Pediatrics"></label>
+    <label>CoStar PDF<input type="file" name="pdf" accept="application/pdf" required></label>
+    <button class="btn gold" id="createBtn">Create survey</button>
+  </form>
+  <table class="list"><thead><tr><th>Survey</th><th>Buildings</th><th>Client votes</th><th>Client activity</th><th>Private link</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
+</main>
+<script src="/js/admin-common.js"></script>
+<script>
+const rows = document.getElementById('rows');
+async function load() {
+  const list = await api('/api/admin/surveys');
+  rows.innerHTML = list.length ? list.map((s) => `
+    <tr class="click" data-id="${s.id}">
+      <td><div class="t-title">${esc(s.title)}</div><div class="muted" style="font-size:12.5px">${esc(s.client_name || 'No client set')} · created ${fmtDate(s.created_at)}</div>
+        ${s.status !== 'ready' ? `<span class="pill ${s.status === 'error' ? 'down' : ''}">${s.status === 'error' ? 'Error' : 'Processing…'}</span>` : ''}</td>
+      <td>${s.building_count}</td>
+      <td><span class="score"><span class="pill up">👍 ${s.up}</span><span class="pill down">👎 ${s.down}</span>${s.building_count - s.up - s.down > 0 ? `<span class="pill gray">${s.building_count - s.up - s.down} unrated</span>` : ''}</span></td>
+      <td class="muted" style="font-size:12.5px">${s.view_count ? `${s.view_count} view${s.view_count > 1 ? 's' : ''}, last ${fmtDate(s.last_viewed_at)}` : 'Not opened yet'}${s.last_vote_at ? `<br>Last vote ${fmtDate(s.last_vote_at)}` : ''}</td>
+      <td><button class="btn small" data-copy="${location.origin}/s/${s.token}">Copy link</button></td>
+    </tr>`).join('') : '<tr><td colspan="5" class="muted">No surveys yet. Upload your first CoStar report above.</td></tr>';
+  if (list.some((s) => s.status === 'processing')) setTimeout(load, 3000);
+}
+rows.addEventListener('click', (e) => {
+  const c = e.target.closest('[data-copy]');
+  if (c) { e.stopPropagation(); copy(c.dataset.copy); return; }
+  const tr = e.target.closest('tr[data-id]');
+  if (tr) location.href = `/admin/surveys/${tr.dataset.id}`;
+});
+document.getElementById('newForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const btn = document.getElementById('createBtn');
+  btn.disabled = true; btn.textContent = 'Uploading…';
+  try {
+    const r = await fetch('/api/admin/surveys', { method: 'POST', body: new FormData(e.target) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Upload failed');
+    const { id } = await r.json();
+    location.href = `/admin/surveys/${id}`;
+  } catch (err) { alert(err.message); btn.disabled = false; btn.textContent = 'Create survey'; }
+});
+load();
+</script>
+</body></html>

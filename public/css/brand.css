@@ -1,0 +1,43 @@
+/* ===== Tenant Consulting brand tokens. Swap these to match the official brand. ===== */
+:root {
+  --navy: #12294a;
+  --navy-2: #1e3d68;
+  --gold: #c9a24b;
+  --gold-soft: #f3ead6;
+  --paper: #f7f5f0;
+  --card: #ffffff;
+  --ink: #1b2430;
+  --muted: #667080;
+  --line: #e4e0d6;
+  --up: #2f8a5b;
+  --up-soft: #e3f3ea;
+  --down: #b9473a;
+  --down-soft: #f8e5e2;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(18,41,74,.06), 0 6px 20px rgba(18,41,74,.08);
+  --font: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --serif: "Libre Caslon Text", Georgia, "Times New Roman", serif;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font-family: var(--font); color: var(--ink); background: var(--paper); font-size: 14px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+a { color: var(--navy-2); }
+button { font: inherit; cursor: pointer; }
+.brandbar { background: var(--navy); color: #fff; display: flex; align-items: center; gap: 18px; padding: 0 18px; height: 60px; border-bottom: 3px solid var(--gold); }
+.brandbar .logo { height: 32px; color: #fff; display: block; }
+.brandbar .logo img, .brandbar .logo svg { height: 32px; }
+.btn { border: 1px solid var(--line); background: #fff; color: var(--ink); border-radius: 8px; padding: 8px 14px; font-weight: 500; }
+.btn:hover { border-color: var(--navy-2); }
+.btn.primary { background: var(--navy); border-color: var(--navy); color: #fff; }
+.btn.primary:hover { background: var(--navy-2); }
+.btn.gold { background: var(--gold); border-color: var(--gold); color: var(--navy); font-weight: 600; }
+.btn.danger { color: var(--down); }
+.btn.small { padding: 4px 10px; font-size: 13px; }
+.muted { color: var(--muted); }
+.serif { font-family: var(--serif); }
+.pill { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; background: var(--gold-soft); color: #7a5c17; font-weight: 500; }
+.pill.up { background: var(--up-soft); color: var(--up); }
+.pill.down { background: var(--down-soft); color: var(--down); }
+.pill.gray { background: #eef0f3; color: var(--muted); }
+input, textarea, select { font: inherit; color: inherit; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; background: #fff; width: 100%; }
+input:focus, textarea:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--gold) 60%, transparent); border-color: var(--gold); }

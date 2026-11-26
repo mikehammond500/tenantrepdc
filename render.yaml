@@ -1,0 +1,22 @@
+# Render.com blueprint: New > Blueprint > pick this repo.
+services:
+  - type: web
+    name: tenantrepdc
+    runtime: docker
+    plan: starter            # a paid plan is required for a persistent disk
+    healthCheckPath: /healthz
+    disk:
+      name: data
+      mountPath: /data
+      sizeGB: 5
+    envVars:
+      - key: ADMIN_PASSWORD
+        sync: false          # you'll be prompted to enter it
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: BROKER_NAME
+        sync: false
+      - key: BROKER_EMAIL
+        sync: false
+      - key: BROKER_PHONE
+        sync: false

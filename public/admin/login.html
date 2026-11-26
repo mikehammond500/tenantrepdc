@@ -1,0 +1,13 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>Broker login · Tenant Consulting</title><link rel="icon" href="/img/favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Libre+Caslon+Text&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/css/brand.css"></head>
+<body><header class="brandbar"><span class="logo"><img src="/img/logo.svg" alt="Tenant Consulting"></span></header>
+<main style="max-width:360px;margin:12vh auto;padding:0 20px">
+<h1 class="serif" style="color:var(--navy);font-weight:400">Broker login</h1>
+<form method="post" action="/admin/login" style="display:grid;gap:12px">
+<p id="err" style="color:var(--down);margin:0" hidden>Wrong password.</p>
+<input type="password" name="password" placeholder="Password" autofocus required autocomplete="current-password">
+<button class="btn primary">Sign in</button></form></main>
+<script>if (location.search.includes('error')) document.getElementById('err').hidden = false;</script>
+</body></html>
