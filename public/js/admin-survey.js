@@ -25,6 +25,7 @@
     document.title = `${s.title} · Edit survey`;
     $('#title').value = s.title; $('#client').value = s.client_name || '';
     $('#nnn').value = s.nnn_estimate ?? '';
+    $('#archBtn').textContent = s.archived ? 'Unarchive' : 'Archive';
     $('#srcLine').textContent = `Source: ${s.pdf_name || 'PDF'} · ${data.buildings.length} buildings · ${s.view_count} client view${s.view_count === 1 ? '' : 's'}${s.last_viewed_at ? ', last ' + fmtDate(s.last_viewed_at) : ''}`;
     const link = `${location.origin}/s/${s.token}`;
     $('#link').value = link; $('#openBtn').href = link;
@@ -141,6 +142,12 @@
     await api(`/api/admin/surveys/${id}/reimport`, { method: 'POST' }); toast('Re-importing…'); load();
   };
   $('#resetBtn').onclick = async () => { if (!confirm('Clear all of the client\'s votes and notes on this survey?')) return; await api(`/api/admin/surveys/${id}/reset-votes`, { method: 'POST' }); load(); };
+  $('#dupBtn').onclick = async () => {
+    const title = prompt('Name for the copy (it gets its own private link; client votes are not copied):', `${data.survey.title} (copy)`);
+    if (!title) return;
+    const r = await api(`/api/admin/surveys/${id}/duplicate`, { json: { title } }); location.href = `/admin/surveys/${r.id}`;
+  };
+  $('#archBtn').onclick = async () => { await api(`/api/admin/surveys/${id}`, { method: 'PATCH', json: { archived: !data.survey.archived } }); toast(data.survey.archived ? 'Unarchived' : 'Archived. The client link still works.'); load(); };
   $('#deleteBtn').onclick = async () => { if (!confirm('Delete this survey permanently? The client link will stop working.')) return; await api(`/api/admin/surveys/${id}`, { method: 'DELETE' }); location.href = '/admin'; };
   $('#addBld').onclick = async () => { const r = await api(`/api/admin/surveys/${id}/buildings`, { method: 'POST', json: {} }); open.add(r.id); await load(); focusBuilding(r.id); };
   $('#results').addEventListener('click', (e) => { const j = e.target.closest('[data-jump]'); if (j) focusBuilding(Number(j.dataset.jump)); });

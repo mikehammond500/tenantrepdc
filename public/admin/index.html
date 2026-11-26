@@ -9,35 +9,106 @@
   <h1 class="page">Property surveys</h1>
   <p class="muted" style="margin-top:0">Upload a CoStar report to create a private map survey for a client.</p>
   <form class="panel grid-form" id="newForm" style="margin:16px 0 26px">
-    <label>Survey title<input name="title" placeholder="e.g. Loudoun Office Options, Dec 2026"></label>
+    <label>Survey name<input name="title" placeholder="e.g. Loudoun Office Options, Dec 2026"></label>
     <label>Client<input name="client_name" placeholder="e.g. Acme Pediatrics"></label>
     <label>CoStar PDF<input type="file" name="pdf" accept="application/pdf" required></label>
     <button class="btn gold" id="createBtn">Create survey</button>
   </form>
-  <table class="list"><thead><tr><th>Survey</th><th>Buildings</th><th>Client votes</th><th>Client activity</th><th>Private link</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
+  <div class="listbar">
+    <input id="search" type="search" placeholder="Search by survey or client name">
+    <label class="muted"><input type="checkbox" id="showArchived"> Show archived</label>
+  </div>
+  <table class="list"><thead><tr><th>Survey</th><th>Buildings</th><th>Client votes</th><th>Client activity</th><th style="text-align:right">Actions</th></tr></thead><tbody id="rows"><tr><td colspan="5" class="muted">Loading…</td></tr></tbody></table>
 </main>
+<dialog id="dlg" class="dlg"><form method="dialog" id="dlgForm">
+  <h3 id="dlgTitle"></h3>
+  <label>Survey name<input name="title" required></label>
+  <label>Client<input name="client_name"></label>
+  <p class="muted" id="dlgNote" style="font-size:12.5px;margin:0"></p>
+  <div class="dlg-actions"><button class="btn" value="cancel" formnovalidate>Cancel</button><button class="btn primary" value="ok" id="dlgOk">Save</button></div>
+</form></dialog>
 <script src="/js/admin-common.js"></script>
 <script>
 const rows = document.getElementById('rows');
-async function load() {
-  const list = await api('/api/admin/surveys');
+let all = [];
+const ICON = {
+  open: 'Open', link: 'Copy link',
+};
+function render() {
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  const showArch = document.getElementById('showArchived').checked;
+  const list = all.filter((s) => (showArch || !s.archived) && (!q || `${s.title} ${s.client_name || ''}`.toLowerCase().includes(q)));
   rows.innerHTML = list.length ? list.map((s) => `
-    <tr class="click" data-id="${s.id}">
-      <td><div class="t-title">${esc(s.title)}</div><div class="muted" style="font-size:12.5px">${esc(s.client_name || 'No client set')} · created ${fmtDate(s.created_at)}</div>
+    <tr class="click ${s.archived ? 'archived' : ''}" data-id="${s.id}">
+      <td><div class="t-title">${esc(s.title)}${s.archived ? ' <span class="pill gray">Archived</span>' : ''}</div><div class="muted" style="font-size:12.5px">${esc(s.client_name || 'No client set')} · created ${fmtDate(s.created_at)}</div>
         ${s.status !== 'ready' ? `<span class="pill ${s.status === 'error' ? 'down' : ''}">${s.status === 'error' ? 'Error' : 'Processing…'}</span>` : ''}</td>
       <td>${s.building_count}</td>
       <td><span class="score"><span class="pill up">👍 ${s.up}</span><span class="pill down">👎 ${s.down}</span>${s.building_count - s.up - s.down > 0 ? `<span class="pill gray">${s.building_count - s.up - s.down} unrated</span>` : ''}</span></td>
       <td class="muted" style="font-size:12.5px">${s.view_count ? `${s.view_count} view${s.view_count > 1 ? 's' : ''}, last ${fmtDate(s.last_viewed_at)}` : 'Not opened yet'}${s.last_vote_at ? `<br>Last vote ${fmtDate(s.last_vote_at)}` : ''}</td>
-      <td><button class="btn small" data-copy="${location.origin}/s/${s.token}">Copy link</button></td>
-    </tr>`).join('') : '<tr><td colspan="5" class="muted">No surveys yet. Upload your first CoStar report above.</td></tr>';
-  if (list.some((s) => s.status === 'processing')) setTimeout(load, 3000);
+      <td class="acts">
+        <button class="btn small primary" data-act="copy">Copy link</button>
+        <details class="menu"><summary class="btn small" aria-label="More actions">More ▾</summary><div>
+          <button data-act="open">Open / edit</button>
+          <button data-act="rename">Rename</button>
+          <button data-act="duplicate">Duplicate</button>
+          <button data-act="preview">Preview as client</button>
+          <button data-act="archive">${s.archived ? 'Unarchive' : 'Archive'}</button>
+          <button data-act="delete" class="danger">Delete…</button>
+        </div></details>
+      </td>
+    </tr>`).join('') : `<tr><td colspan="5" class="muted">${all.length ? 'No surveys match.' : 'No surveys yet. Upload your first CoStar report above.'}</td></tr>`;
 }
-rows.addEventListener('click', (e) => {
-  const c = e.target.closest('[data-copy]');
-  if (c) { e.stopPropagation(); copy(c.dataset.copy); return; }
-  const tr = e.target.closest('tr[data-id]');
-  if (tr) location.href = `/admin/surveys/${tr.dataset.id}`;
+async function load() {
+  all = await api('/api/admin/surveys');
+  render();
+  if (all.some((s) => s.status === 'processing')) setTimeout(load, 3000);
+}
+function ask({ title, note, okLabel, values }) {
+  const d = document.getElementById('dlg'), f = document.getElementById('dlgForm');
+  document.getElementById('dlgTitle').textContent = title;
+  document.getElementById('dlgNote').textContent = note || '';
+  document.getElementById('dlgOk').textContent = okLabel;
+  f.title.value = values.title || ''; f.client_name.value = values.client_name || '';
+  d.showModal(); f.title.select();
+  return new Promise((resolve) => d.addEventListener('close', () => resolve(d.returnValue === 'ok' ? { title: f.title.value.trim(), client_name: f.client_name.value.trim() } : null), { once: true }));
+}
+rows.addEventListener('click', async (e) => {
+  if (e.target.closest('summary')) { e.stopPropagation(); document.querySelectorAll('details.menu[open]').forEach((m) => { if (!m.contains(e.target)) m.open = false; }); return; }
+  const actBtn = e.target.closest('[data-act]');
+  const tr = e.target.closest('tr[data-id]'); if (!tr) return;
+  const s = all.find((x) => x.id === Number(tr.dataset.id));
+  if (!actBtn) { if (!e.target.closest('.acts')) location.href = `/admin/surveys/${s.id}`; return; }
+  e.stopPropagation(); actBtn.closest('details')?.removeAttribute('open');
+  const link = `${location.origin}/s/${s.token}`;
+  try {
+    switch (actBtn.dataset.act) {
+      case 'copy': return copy(link);
+      case 'open': location.href = `/admin/surveys/${s.id}`; return;
+      case 'preview': window.open(link, '_blank'); return;
+      case 'rename': {
+        const v = await ask({ title: 'Rename survey', okLabel: 'Save', values: s });
+        if (!v) return;
+        await api(`/api/admin/surveys/${s.id}`, { method: 'PATCH', json: v }); toast('Renamed'); return load();
+      }
+      case 'duplicate': {
+        const v = await ask({ title: 'Duplicate survey', okLabel: 'Duplicate', values: { title: `${s.title} (copy)`, client_name: s.client_name },
+          note: 'Copies the buildings, suites, photos, floor plans, your notes and NNN settings, with a new private link. Client votes and notes are not copied.' });
+        if (!v) return;
+        const r = await api(`/api/admin/surveys/${s.id}/duplicate`, { json: v }); toast('Duplicated');
+        location.href = `/admin/surveys/${r.id}`; return;
+      }
+      case 'archive':
+        await api(`/api/admin/surveys/${s.id}`, { method: 'PATCH', json: { archived: !s.archived } });
+        toast(s.archived ? 'Unarchived' : 'Archived. The client link still works.'); return load();
+      case 'delete':
+        if (!confirm(`Delete "${s.title}" permanently?\n\nThe client link stops working and the votes are lost. This can't be undone. (Tip: Archive instead to hide it but keep everything.)`)) return;
+        await api(`/api/admin/surveys/${s.id}`, { method: 'DELETE' }); toast('Deleted'); return load();
+    }
+  } catch (err) { alert(err.message); }
 });
+document.addEventListener('click', (e) => { if (!e.target.closest('details.menu')) document.querySelectorAll('details.menu[open]').forEach((m) => { m.open = false; }); });
+document.getElementById('search').addEventListener('input', render);
+document.getElementById('showArchived').addEventListener('change', render);
 document.getElementById('newForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = document.getElementById('createBtn');

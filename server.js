@@ -4,7 +4,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
-const { db, DATA_DIR, surveyDir } = require('./lib/db');
+const { db, DATA_DIR, surveyDir, tx } = require('./lib/db');
 const { processSurvey, enrichExisting, reimportSurvey } = require('./lib/process');
 const { matchSuite } = require('./lib/floorplans');
 const { geocode } = require('./lib/geocode');
@@ -87,7 +87,7 @@ function surveyPayload(survey, { admin }) {
     vote: vmap[b.id] || null,
   }));
   const s = { id: survey.id, title: survey.title, client_name: survey.client_name, status: survey.status, created_at: survey.created_at, nnn_estimate: survey.nnn_estimate };
-  if (admin) Object.assign(s, { token: survey.token, pdf_name: survey.pdf_name, status_detail: survey.status_detail, view_count: survey.view_count, last_viewed_at: survey.last_viewed_at });
+  if (admin) Object.assign(s, { archived: !!survey.archived, token: survey.token, pdf_name: survey.pdf_name, status_detail: survey.status_detail, view_count: survey.view_count, last_viewed_at: survey.last_viewed_at });
   return { survey: s, buildings: out };
 }
 const safeJson = (s, d) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
@@ -106,7 +106,7 @@ A.use(requireAdmin);
 
 A.get('/surveys', (req, res) => {
   res.json(db.prepare(`
-    SELECT s.id, s.title, s.client_name, s.status, s.status_detail, s.created_at, s.token, s.view_count, s.last_viewed_at,
+    SELECT s.id, s.title, s.client_name, s.status, s.status_detail, s.created_at, s.token, s.view_count, s.last_viewed_at, s.archived,
       (SELECT COUNT(*) FROM buildings b WHERE b.survey_id = s.id AND b.hidden = 0) AS building_count,
       (SELECT COUNT(*) FROM votes v WHERE v.survey_id = s.id AND v.vote = 1) AS up,
       (SELECT COUNT(*) FROM votes v WHERE v.survey_id = s.id AND v.vote = -1) AS down,
@@ -138,8 +138,44 @@ A.patch('/surveys/:id', (req, res) => {
   let nnn = 'nnn_estimate' in req.body ? req.body.nnn_estimate : s.nnn_estimate;
   nnn = nnn === '' || nnn == null ? null : Number(String(nnn).replace(/[$,]/g, ''));
   if (nnn != null && !(nnn >= 0 && nnn < 1000)) return res.status(400).json({ error: 'Enter NNN as dollars per SF per year, e.g. 9.50' });
-  db.prepare('UPDATE surveys SET title = ?, client_name = ?, nnn_estimate = ? WHERE id = ?').run(title, client_name, nnn, s.id);
+  const archived = 'archived' in req.body ? (req.body.archived ? 1 : 0) : s.archived;
+  if (!String(title || '').trim()) return res.status(400).json({ error: 'The survey needs a name.' });
+  db.prepare('UPDATE surveys SET title = ?, client_name = ?, nnn_estimate = ?, archived = ? WHERE id = ?').run(String(title).trim(), client_name, nnn, archived, s.id);
   res.json({ ok: true });
+});
+
+// Copy a survey (buildings, suites, floor plans, photos, your notes and NNN settings) with a new private link.
+// Client votes, notes and view counts are not copied, so it's ready to send to someone new.
+A.post('/surveys/:id/duplicate', (req, res) => {
+  const s = getSurvey(req.params.id);
+  if (!s) return res.sendStatus(404);
+  if (s.status === 'processing') return res.status(409).json({ error: 'Wait for this survey to finish processing first.' });
+  const title = String(req.body.title || '').trim() || `${s.title} (copy)`;
+  const client = 'client_name' in req.body ? (String(req.body.client_name || '').trim() || null) : s.client_name;
+  const newId = tx(() => {
+    const { lastInsertRowid } = db.prepare(`INSERT INTO surveys (token, title, client_name, pdf_name, status, status_detail, nnn_estimate)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`).run(newToken(), title, client, s.pdf_name, s.status, s.status_detail, s.nnn_estimate);
+    const nid = Number(lastInsertRowid);
+    const bcols = db.prepare('PRAGMA table_info(buildings)').all().map((c) => c.name).filter((c) => !['id', 'survey_id'].includes(c));
+    const scols = db.prepare('PRAGMA table_info(suites)').all().map((c) => c.name).filter((c) => !['id', 'building_id'].includes(c));
+    for (const b of db.prepare('SELECT * FROM buildings WHERE survey_id = ?').all(s.id)) {
+      const nb = Number(db.prepare(`INSERT INTO buildings (survey_id, ${bcols.join(', ')}) VALUES (?, ${bcols.map(() => '?').join(', ')})`)
+        .run(nid, ...bcols.map((c) => b[c])).lastInsertRowid);
+      const suiteMap = {};
+      for (const su of db.prepare('SELECT * FROM suites WHERE building_id = ?').all(b.id)) {
+        suiteMap[su.id] = Number(db.prepare(`INSERT INTO suites (building_id, ${scols.join(', ')}) VALUES (?, ${scols.map(() => '?').join(', ')})`)
+          .run(nb, ...scols.map((c) => su[c])).lastInsertRowid);
+      }
+      for (const f of db.prepare('SELECT * FROM floor_plans WHERE building_id = ?').all(b.id)) {
+        db.prepare('INSERT INTO floor_plans (building_id, suite_id, caption, file) VALUES (?, ?, ?, ?)').run(nb, f.suite_id ? suiteMap[f.suite_id] ?? null : null, f.caption, f.file);
+      }
+    }
+    return nid;
+  });
+  // Photos, floor plans and the source PDF live in the survey's folder; copy it.
+  const from = path.join(DATA_DIR, 'files', String(s.id));
+  if (fs.existsSync(from)) fs.cpSync(from, surveyDir(newId), { recursive: true });
+  res.json({ id: newId });
 });
 
 A.post('/surveys/:id/rotate-link', (req, res) => {
