@@ -5,7 +5,7 @@ const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const { db, DATA_DIR, surveyDir } = require('./lib/db');
-const { processSurvey, enrichExisting } = require('./lib/process');
+const { processSurvey, enrichExisting, reimportSurvey } = require('./lib/process');
 const { matchSuite } = require('./lib/floorplans');
 const { geocode } = require('./lib/geocode');
 const pdf = require('./lib/pdf');
@@ -146,6 +146,14 @@ A.post('/surveys/:id/rotate-link', (req, res) => {
   const token = newToken();
   db.prepare('UPDATE surveys SET token = ? WHERE id = ?').run(token, req.params.id);
   res.json({ token });
+});
+
+A.post('/surveys/:id/reimport', (req, res) => {
+  const s = getSurvey(req.params.id);
+  if (!s) return res.sendStatus(404);
+  db.prepare("UPDATE surveys SET status = 'processing', status_detail = 'Re-reading PDF' WHERE id = ?").run(s.id);
+  reimportSurvey(s.id).catch((e) => db.prepare("UPDATE surveys SET status = 'error', status_detail = ? WHERE id = ?").run(e.message, s.id));
+  res.json({ ok: true });
 });
 
 A.post('/surveys/:id/reset-votes', (req, res) => {

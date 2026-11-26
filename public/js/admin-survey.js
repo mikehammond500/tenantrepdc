@@ -72,7 +72,7 @@
             ${b.suites.map((su) => `<tr data-sid="${su.id}">${S_FIELDS.map(([k, , w]) => `<td><input data-sf="${k}" value="${esc(su[k] ?? '')}" style="min-width:${w}px"></td>`).join('')}<td><button class="btn small danger" data-act="delSuite" title="Remove suite">×</button></td></tr>`).join('')}
           </tbody></table>
           <div class="sub"><span>Floor plans</span><label class="btn small" style="text-transform:none;letter-spacing:0;font-weight:500">+ Upload (PDF or image)<input type="file" accept="application/pdf,image/*" data-act="uploadPlan" hidden></label></div>
-          <div class="plans">${b.floor_plans.map((f) => `<div class="plan" data-fid="${f.id}"><a href="${f.url}" target="_blank"><img src="${f.url}" alt=""></a><div class="pc">
+          <div class="plans">${b.floor_plans.map((f) => `<div class="plan" data-fid="${f.id}"><img src="${f.url}" alt="" data-view="${f.url}" data-cap="${esc(f.caption || 'Floor plan')}" style="cursor:zoom-in"><div class="pc">
             <input data-pf="caption" value="${esc(f.caption || '')}" placeholder="Caption">
             <select data-pf="suite_id"><option value="">Whole building</option>${b.suites.map((su) => `<option value="${su.id}" ${su.id === f.suite_id ? 'selected' : ''}>Suite ${esc(su.suite || su.floor || su.id)}</option>`).join('')}</select>
             <button class="btn small danger" data-act="delPlan">Remove</button></div></div>`).join('') || '<span class="muted" style="font-size:13px">None. Upload one and link it to a suite.</span>'}</div>
@@ -80,7 +80,7 @@
             <label class="btn small">Replace photo<input type="file" accept="image/*" data-act="photo" hidden></label>
             <button class="btn small" data-act="geocode">Re-locate from address</button>
             <button class="btn small" data-act="place">Place on map by clicking</button>
-            ${b.listing_page_url ? `<a class="btn small" style="text-decoration:none" target="_blank" href="${b.listing_page_url}">View original CoStar page</a>` : ''}
+            ${b.listing_page_url ? `<button class="btn small" data-act="listing" data-src="${b.listing_page_url}">View original CoStar page</button>` : ''}
             <button class="btn small" data-act="hide">${b.hidden ? 'Show to client' : 'Hide from client'}</button>
             <button class="btn small danger" data-act="delete">Delete building</button>
           </div>
@@ -131,6 +131,15 @@
   $('#nnn').addEventListener('change', (e) => api(`/api/admin/surveys/${id}`, { method: 'PATCH', json: { nnn_estimate: e.target.value } }).then(() => { toast('NNN estimate saved'); data.survey.nnn_estimate = e.target.value; }).catch((err) => alert(err.message)));
   $('#copyBtn').onclick = () => copy($('#link').value);
   $('#rotateBtn').onclick = async () => { if (!confirm('Create a new private link? The current link will stop working immediately.')) return; await api(`/api/admin/surveys/${id}/rotate-link`, { method: 'POST' }); load(); toast('New link created'); };
+  function showImage(src, cap) { $('#lbImg').src = src; $('#lbCap').textContent = cap; $('#lightbox').hidden = false; }
+  $('#lbClose').onclick = () => { $('#lightbox').hidden = true; };
+  $('#lightbox').addEventListener('click', (e) => { if (e.target.id === 'lightbox') $('#lightbox').hidden = true; });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#lightbox').hidden = true; });
+  document.addEventListener('click', (e) => { const v = e.target.closest('[data-view]'); if (v) showImage(v.dataset.view, v.dataset.cap); });
+  $('#reimportBtn').onclick = async () => {
+    if (!confirm('Re-read the original PDF and rebuild this survey\'s buildings?\n\nKept: client votes and notes, your notes to the client, NNN overrides, hidden buildings and pins you placed by hand.\nReplaced: other field edits, suites and floor plans.')) return;
+    await api(`/api/admin/surveys/${id}/reimport`, { method: 'POST' }); toast('Re-importing…'); load();
+  };
   $('#resetBtn').onclick = async () => { if (!confirm('Clear all of the client\'s votes and notes on this survey?')) return; await api(`/api/admin/surveys/${id}/reset-votes`, { method: 'POST' }); load(); };
   $('#deleteBtn').onclick = async () => { if (!confirm('Delete this survey permanently? The client link will stop working.')) return; await api(`/api/admin/surveys/${id}`, { method: 'DELETE' }); location.href = '/admin'; };
   $('#addBld').onclick = async () => { const r = await api(`/api/admin/surveys/${id}/buildings`, { method: 'POST', json: {} }); open.add(r.id); await load(); focusBuilding(r.id); };
@@ -154,6 +163,7 @@
       if (act === 'delPlan') { const fid = e.target.closest('.plan').dataset.fid; await api(`/api/admin/floor-plans/${fid}`, { method: 'DELETE' }); load(); }
       if (act === 'geocode') { await api(`/api/admin/buildings/${bid}/geocode`, { method: 'POST' }); map._fitted = false; toast('Located'); load(); }
       if (act === 'place') { placing = bid; $('#hint').textContent = `Click the map to place #${b.ord}`; $('#hint').hidden = false; map.getContainer().style.cursor = 'crosshair'; $('.ed-map').scrollIntoView({ behavior: 'smooth' }); }
+      if (act === 'listing') { showImage(e.target.closest('[data-act]').dataset.src, `Original CoStar page · ${b.name || b.address}`); return; }
       if (act === 'hide') { await api(`/api/admin/buildings/${bid}`, { method: 'PATCH', json: { hidden: b.hidden ? 0 : 1 } }); load(); }
       if (act === 'delete') { if (!confirm(`Delete ${b.name || b.address} from this survey?`)) return; await api(`/api/admin/buildings/${bid}`, { method: 'DELETE' }); load(); }
     } catch (err) { alert(err.message); }
