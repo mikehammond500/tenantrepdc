@@ -71,3 +71,7 @@ table.suites input:hover { border-color: var(--line); }
 .pin svg { display: block; filter: drop-shadow(0 2px 2px rgba(0,0,0,.3)); }
 .pin span { position: absolute; top: 5px; left: 0; width: 30px; text-align: center; color: #fff; font: 700 12px/18px var(--font); }
 @media (max-width: 1000px) { .ed-body { grid-template-columns: 1fr; } .ed-map { position: relative; height: 360px; top: 0; } .results { grid-template-columns: 1fr; } .grid-form { grid-template-columns: 1fr; } .linkbox { min-width: 0; width: 100%; } .fields { grid-template-columns: 1fr 1fr; } }
+.astars { color: #1f5fbf; font-size: 13px; letter-spacing: 1px; margin-left: 4px; }
+.nnnbox { display: grid; gap: 3px; margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--navy); max-width: 420px; }
+.nnnbox .muted { font-weight: 400; }
+.nnnrow { display: flex; align-items: center; gap: 4px; max-width: 140px; }

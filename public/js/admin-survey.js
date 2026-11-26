@@ -11,9 +11,10 @@
     ['available_size', 'Available'], ['asking_rent', 'Asking rent'], ['service_type', 'Service type'], ['occupancy', 'Occupancy'],
     ['term', 'Term'], ['property_type', 'Property type'], ['building_class', 'Class'], ['rba_sf', 'Building SF'],
     ['year_built', 'Year built'], ['renovated', 'Renovated'], ['stories', 'Stories'], ['typical_floor', 'Typical floor'],
-    ['parking', 'Parking'], ['ord', 'Pin #'], ['lat', 'Latitude'],
+    ['parking', 'Parking'], ['costar_rating', 'CoStar stars (0-5)'], ['nnn_override', 'NNN $/SF/yr (overrides area estimate)'], ['ord', 'Pin #'], ['lat', 'Latitude'],
     ['broker_notes', 'Your notes to the client (shown on the survey)', 'w4', 'textarea'],
     ['overview', 'Property overview', 'w4', 'textarea'], ['highlights', 'Highlights (one per line)', 'w4', 'textarea'],
+    ['details', 'All CoStar details shown to the client (one per line, "Label: value")', 'w4', 'textarea'],
   ];
   const S_FIELDS = [['suite', 'Suite', 60], ['floor', 'Floor', 50], ['sf', 'SF', 90], ['rent', 'Rent', 80], ['rent_type', 'Type', 45],
     ['space_use', 'Use', 100], ['lease_type', 'Lease', 70], ['occupancy', 'Avail.', 90], ['term', 'Term', 90], ['address', 'Address', 130]];
@@ -23,6 +24,7 @@
     const s = data.survey;
     document.title = `${s.title} · Edit survey`;
     $('#title').value = s.title; $('#client').value = s.client_name || '';
+    $('#nnn').value = s.nnn_estimate ?? '';
     $('#srcLine').textContent = `Source: ${s.pdf_name || 'PDF'} · ${data.buildings.length} buildings · ${s.view_count} client view${s.view_count === 1 ? '' : 's'}${s.last_viewed_at ? ', last ' + fmtDate(s.last_viewed_at) : ''}`;
     const link = `${location.origin}/s/${s.token}`;
     $('#link').value = link; $('#openBtn').href = link;
@@ -46,6 +48,7 @@
 
   function fieldVal(b, k) {
     if (k === 'highlights') return (b.highlights || []).join('\n');
+    if (k === 'details') return (b.details || []).map(([l, v]) => `${l}: ${v}`).join('\n');
     return b[k] ?? '';
   }
 
@@ -56,7 +59,7 @@
       return `<div class="bld ${open.has(b.id) ? 'open' : ''} ${b.hidden ? 'hidden-b' : ''}" data-id="${b.id}" id="bld-${b.id}">
         <div class="bld-head" data-toggle>
           <div class="ph" style="${b.photo_url ? `background-image:url('${b.photo_url}')` : ''}"><span class="num ${s}">${b.ord}</span></div>
-          <div><div class="t">${esc(b.name || b.address || 'Untitled')}</div><div class="s">${esc(b.address || '')}${b.city ? ', ' + esc(b.city) : ''} · ${b.suites.length} suite${b.suites.length === 1 ? '' : 's'}${b.floor_plans.length ? ` · ${b.floor_plans.length} floor plan${b.floor_plans.length > 1 ? 's' : ''}` : ''}</div></div>
+          <div><div class="t">${esc(b.name || b.address || 'Untitled')}${b.costar_rating != null ? ` <span class="astars" title="CoStar rating">${'★'.repeat(b.costar_rating)}${'☆'.repeat(5 - b.costar_rating)}</span>` : ''}</div><div class="s">${esc(b.address || '')}${b.city ? ', ' + esc(b.city) : ''} · ${b.suites.length} suite${b.suites.length === 1 ? '' : 's'}${b.floor_plans.length ? ` · ${b.floor_plans.length} floor plan${b.floor_plans.length > 1 ? 's' : ''}` : ''}</div></div>
           <div class="right">${s === 'u' ? '<span class="pill up">👍 Liked</span>' : s === 'd' ? '<span class="pill down">👎 Passed</span>' : ''}${b.hidden ? '<span class="pill gray">Hidden from client</span>' : ''}${geo}</div>
         </div>
         ${b.vote?.comment ? `<div class="vote-note ${s === 'u' ? 'up' : 'down'}" style="margin:0 10px 10px">Client note: "${esc(b.vote.comment)}"</div>` : ''}
@@ -125,6 +128,7 @@
   // ----- events -----
   $('#title').addEventListener('change', (e) => api(`/api/admin/surveys/${id}`, { method: 'PATCH', json: { title: e.target.value } }).then(() => toast('Saved')));
   $('#client').addEventListener('change', (e) => api(`/api/admin/surveys/${id}`, { method: 'PATCH', json: { client_name: e.target.value } }).then(() => toast('Saved')));
+  $('#nnn').addEventListener('change', (e) => api(`/api/admin/surveys/${id}`, { method: 'PATCH', json: { nnn_estimate: e.target.value } }).then(() => { toast('NNN estimate saved'); data.survey.nnn_estimate = e.target.value; }).catch((err) => alert(err.message)));
   $('#copyBtn').onclick = () => copy($('#link').value);
   $('#rotateBtn').onclick = async () => { if (!confirm('Create a new private link? The current link will stop working immediately.')) return; await api(`/api/admin/surveys/${id}/rotate-link`, { method: 'POST' }); load(); toast('New link created'); };
   $('#resetBtn').onclick = async () => { if (!confirm('Clear all of the client\'s votes and notes on this survey?')) return; await api(`/api/admin/surveys/${id}/reset-votes`, { method: 'POST' }); load(); };
@@ -162,7 +166,8 @@
       if (t.dataset.f) {
         let v = t.value;
         if (t.dataset.f === 'highlights') v = v.split('\n').map((x) => x.trim()).filter(Boolean);
-        if (['lat', 'lng', 'rba_sf', 'year_built', 'stories', 'ord'].includes(t.dataset.f)) v = v === '' ? '' : Number(String(v).replace(/,/g, ''));
+        if (t.dataset.f === 'details') v = v.split('\n').map((x) => x.split(/:\s*/)).filter((x) => x[0].trim() && x.length > 1).map(([l, ...r]) => [l.trim(), r.join(': ').trim()]);
+        if (['lat', 'lng', 'rba_sf', 'year_built', 'stories', 'ord', 'costar_rating', 'nnn_override'].includes(t.dataset.f)) v = v === '' ? '' : Number(String(v).replace(/,/g, ''));
         await api(`/api/admin/buildings/${bid}`, { method: 'PATCH', json: { [t.dataset.f]: v } });
         const b = data.buildings.find((x) => x.id === bid); b[t.dataset.f] = v;
         if (['lat', 'lng', 'ord', 'name', 'address'].includes(t.dataset.f)) { renderMap(); }
@@ -177,7 +182,9 @@
         if (t.dataset.act === 'uploadPlan') fd.append('caption', t.files[0].name.replace(/\.\w+$/, ''));
         toast('Uploading…');
         const r = await fetch(`/api/admin/buildings/${bid}/${t.dataset.act === 'photo' ? 'photo' : 'floor-plans'}`, { method: 'POST', body: fd });
-        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Upload failed');
+        const res = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(res.error || 'Upload failed');
+        if (res.total) toast(res.matched ? `Matched ${res.matched} of ${res.total} page(s) to a suite` : 'Uploaded. Pick the suite for each plan below.');
         load();
       }
     } catch (err) { alert(err.message); }

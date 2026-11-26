@@ -111,3 +111,33 @@ h3.sec { font-size: 12px; text-transform: uppercase; letter-spacing: .1em; color
 .contact { margin: 4px 12px 24px; padding: 12px 14px; border-radius: var(--radius); background: var(--navy); color: #fff; display: grid; gap: 2px; font-size: 13px; }
 .contact .eyebrow { font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); font-weight: 600; }
 .contact a { color: #fff; opacity: .85; text-decoration: none; }
+
+.stars { display: inline-flex; gap: 1px; vertical-align: -2px; margin-right: 4px; }
+.stars i { width: 13px; height: 13px; display: inline-block; }
+.stars svg { width: 100%; height: 100%; fill: none; stroke: #9aa3ae; stroke-width: 1.6; }
+.stars i.on svg { fill: #1f5fbf; stroke: #1f5fbf; }
+.rating-line { display: flex; align-items: center; gap: 6px; margin: 2px 0 4px; font-size: 12.5px; }
+.rating-line .stars i { width: 17px; height: 17px; }
+.card .qf { font-size: 12px; color: var(--muted); }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--navy-2); font-size: 12.5px; text-decoration: underline; text-underline-offset: 2px; }
+.note-line { margin-top: 6px; font-size: 12.5px; }
+.note-text { color: var(--ink); font-style: italic; }
+.note-ed { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); cursor: default; }
+.vote-panel .note-ed { border-top: 0; padding-top: 0; margin-top: 10px; }
+.note-q { font-size: 12.5px; font-weight: 600; color: var(--navy); margin-bottom: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 6px; }
+.chip { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 3px 9px; font-size: 12px; color: var(--ink); }
+.chip:hover { border-color: var(--navy-2); }
+.chip.on { background: var(--gold-soft); border-color: var(--gold); color: #6d5212; font-weight: 600; }
+.note-input { font-size: 13px; min-height: 44px; resize: vertical; }
+.note-foot { display: flex; justify-content: space-between; align-items: center; margin-top: 4px; min-height: 18px; }
+.note-foot .saved { font-size: 12px; color: var(--up); }
+
+.card .facts .mo b { color: var(--navy); }
+.card sup, .monthly sup { color: var(--gold); }
+.monthly { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--line); display: flex; flex-direction: column; gap: 1px; font-size: 13px; }
+.monthly b { color: var(--navy); font-size: 14px; }
+.monthly .calc { font-size: 11.5px; color: var(--muted); }
+.cost-notes { margin-top: 8px; padding: 8px 10px; background: var(--gold-soft); border-radius: 8px; font-size: 11.5px; color: #5d4a1b; }
+.cost-notes p { margin: 0 0 4px; } .cost-notes p:last-child { margin: 0; }
+.specs div:last-child:nth-child(odd) { grid-column: span 2; }

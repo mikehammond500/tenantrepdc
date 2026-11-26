@@ -10,8 +10,55 @@
     down: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 14V3h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1h-3zm0 0-4 7a2.5 2.5 0 0 1-3-2.6l.5-3.4H5a2 2 0 0 1-2-2.3l1.3-8A2 2 0 0 1 6.3 3H17"/></svg>',
   };
   const COLORS = { n: '#12294a', u: '#2f8a5b', d: '#b9473a' };
+  const REASONS = {
+    down: ['Too far', 'Building too old', 'Too expensive', 'Too small', 'Too large', 'Not enough parking', 'Poor access', "Don't like the look"],
+    up: ['Great location', 'Good price', 'Like the building', 'Good parking', 'Want to tour'],
+  };
+  const STAR = '<svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg>';
+  const starsHtml = (n) => n == null ? '' : `<span class="stars" title="CoStar rating: ${n} of 5 stars" aria-label="CoStar rating ${n} of 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= n ? 'on' : ''}">${STAR}</i>`).join('')}</span>`;
+  const yearOf = (b) => b.year_built || null;
+  const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
+  const money2 = (n) => '$' + n.toFixed(2);
+  const nums = (t) => (String(t || '').match(/\d[\d,]*(?:\.\d+)?/g) || []).map((x) => Number(x.replace(/,/g, '')));
+  const isNNN = (s, b) => /\bNNN\b|triple\s*net/i.test(`${s.rent_type || ''} ${s.rent || ''}`) || (!s.rent_type && /triple\s*net|\bNNN\b/i.test(b.service_type || ''));
+  /**
+   * Monthly cost for a suite: (base rent [+ NNN]) x SF / 12. Ranges in rent or SF give a low-high range.
+   * NNN comes from the building's own figure if the broker entered one, otherwise the survey's area estimate.
+   */
+  function monthly(s, b) {
+    const rents = nums(s.rent).filter((n) => n > 0 && n < 500);
+    const sfs = nums(s.sf).filter((n) => n >= 50);
+    if (!rents.length || !sfs.length) return null;
+    const perMonth = /\/\s*mo/i.test(s.rent || '');
+    let rLo = Math.min(...rents), rHi = Math.max(...rents);
+    if (perMonth) { rLo *= 12; rHi *= 12; }
+    let nnn = 0, nnnSource = null;
+    if (isNNN(s, b)) {
+      if (b.nnn_override != null && b.nnn_override !== '') { nnn = Number(b.nnn_override); nnnSource = 'advisor'; }
+      else if (data.survey.nnn_estimate != null && data.survey.nnn_estimate !== '') { nnn = Number(data.survey.nnn_estimate); nnnSource = 'estimate'; }
+      else nnnSource = 'missing';
+    }
+    const lo = (rLo + nnn) * Math.min(...sfs) / 12, hi = (rHi + nnn) * Math.max(...sfs) / 12;
+    return { lo, hi, rLo, rHi, nnn, nnnSource, sfLo: Math.min(...sfs), sfHi: Math.max(...sfs) };
+  }
+  const moneyRange = (m) => Math.round(m.lo) === Math.round(m.hi) ? money(m.lo) : `${money(m.lo)} – ${money(m.hi)}`;
+  function minMonthly(b) {
+    const ms = b.suites.map((s) => monthly(s, b)).filter(Boolean);
+    if (!ms.length) return null;
+    return { lo: Math.min(...ms.map((m) => m.lo)), est: ms.some((m) => m.nnnSource === 'estimate'), missing: ms.some((m) => m.nnnSource === 'missing') };
+  }
+  const quickFacts = (b) => [
+    yearOf(b) ? `Built ${yearOf(b)}` : null,
+    b.renovated ? `Renov. ${String(b.renovated).replace(/^[A-Za-z]{3}\s+/, '')}` : null,
+    b.parking ? `${String(b.parking).replace(/Spaces?/i, 'parking')}` : null,
+  ].filter(Boolean).join(' · ');
+  // CoStar label -> editable column, so broker edits win over the PDF value.
+  const LABEL_COL = { 'Available Size': 'available_size', 'Asking Rent': 'asking_rent', 'Service Type': 'service_type', 'Occupancy': 'occupancy',
+    'Term': 'term', 'Primary Property Type': 'property_type', 'Building Class': 'building_class', 'Year Built': 'year_built',
+    'Renovated': 'renovated', 'Stories': 'stories', 'Typical Floor': 'typical_floor', 'Parking': 'parking', 'Building Size': 'rba_sf' };
 
   let data = null, map, markers = {}, selected = null, filter = 'all';
+  const openNotes = new Set();
 
   const state = (b) => (b.vote?.vote === 1 ? 'u' : b.vote?.vote === -1 ? 'd' : 'n');
   const visible = () => data.buildings.filter((b) => filter === 'all' || (filter === 'up' && state(b) === 'u') || (filter === 'down' && state(b) === 'd') || (filter === 'none' && state(b) === 'n'));
@@ -79,6 +126,22 @@
       <button class="vbtn down ${big ? 'big' : ''} ${v === -1 ? 'on' : ''}" data-v="-1" aria-pressed="${v === -1}" title="Thumbs down">${ICON.down}${big ? 'Pass' : ''}</button></span>`;
   }
 
+  /** Note area: collapsed shows the note (or an "Add a note" link); open shows reason chips + text box. */
+  function noteBlock(b, open, inDetail) {
+    const note = b.vote?.comment || '';
+    const kind = b.vote?.vote === -1 ? 'down' : b.vote?.vote === 1 ? 'up' : null;
+    const chips = (kind ? REASONS[kind] : [...REASONS.down.slice(0, 4), ...REASONS.up.slice(0, 3)]);
+    if (!open && !inDetail) {
+      return `<div class="note-line" data-bid="${b.id}">${note ? `<span class="note-text">“${esc(note)}”</span> <button class="linkbtn" data-note-open>Edit note</button>` : `<button class="linkbtn" data-note-open>＋ Add a note for your advisor</button>`}</div>`;
+    }
+    return `<div class="note-ed" data-bid="${b.id}">
+      ${inDetail ? '' : `<div class="note-q">${kind === 'down' ? 'What ruled it out?' : kind === 'up' ? 'What do you like about it?' : 'Note for your advisor'}</div>`}
+      <div class="chips">${chips.map((c) => `<button class="chip ${note.toLowerCase().includes(c.toLowerCase()) ? 'on' : ''}" data-chip="${esc(c)}">${esc(c)}</button>`).join('')}</div>
+      <textarea class="note-input" rows="2" placeholder="Type a note, e.g. “too far from Metro”, “building too old”">${esc(note)}</textarea>
+      <div class="note-foot"><span class="saved"></span>${inDetail ? '' : '<button class="linkbtn" data-note-close>Done</button>'}</div>
+    </div>`;
+  }
+
   function renderList() {
     const counts = { all: data.buildings.length, up: 0, down: 0, none: 0 };
     data.buildings.forEach((b) => { const s = state(b); counts[s === 'u' ? 'up' : s === 'd' ? 'down' : 'none']++; });
@@ -99,8 +162,11 @@
             ${b.available_size ? `<span><b>${esc(b.available_size)}</b> avail.</span>` : ''}
             <span>${esc(rentStr(b))}</span>
             ${nSuites ? `<span>${nSuites} suite${nSuites > 1 ? 's' : ''}</span>` : ''}
+            ${(() => { const m = minMonthly(b); return m ? `<span class="mo">From <b>${money(m.lo)}/mo</b>${m.est ? '<sup title="Includes estimated NNN">*</sup>' : ''}${m.missing ? '<sup title="Base rent only; NNN not included">†</sup>' : ''}</span>` : ''; })()}
           </div>
-          <div class="row"><span class="muted" style="font-size:12px">${esc([b.building_class && `Class ${b.building_class}`, b.property_type].filter(Boolean).join(' · '))}</span>${voteButtons(b)}</div>
+          ${quickFacts(b) ? `<div class="qf">${esc(quickFacts(b))}</div>` : ''}
+          <div class="row"><span class="muted" style="font-size:12px">${starsHtml(b.costar_rating)} ${esc([b.building_class && `Class ${b.building_class}`, b.property_type].filter(Boolean).join(' · '))}</span>${voteButtons(b)}</div>
+          ${noteBlock(b, openNotes.has(b.id))}
         </div></li>`;
     }).join('') : '<li class="empty">No buildings in this view.</li>';
   }
@@ -112,6 +178,24 @@
   }
 
   function specRow(label, val) { return val == null || val === '' ? '' : `<div><dt>${label}</dt><dd>${esc(val)}</dd></div>`; }
+
+  /** Every CoStar label/value pair, with the broker's edited values taking priority. */
+  function detailRows(b) {
+    const rows = []; const seen = new Set();
+    for (const [label, val] of b.details || []) {
+      const col = LABEL_COL[label];
+      let v = col ? b[col] : val;
+      if (col === 'rba_sf' && v) v = `${fmtInt(v)} SF`;
+      if (v == null || v === '') v = val;
+      rows.push([label, v]); if (col) seen.add(col);
+    }
+    for (const [label, col] of Object.entries(LABEL_COL)) {
+      if (seen.has(col) || b[col] == null || b[col] === '') continue;
+      rows.push([label, col === 'rba_sf' ? `${fmtInt(b[col])} SF` : b[col]]);
+    }
+    if (b.costar_rating != null) rows.splice(Math.min(rows.length, 1), 0, ['CoStar Rating', `${b.costar_rating} of 5 stars`]);
+    return rows.map(([l, v]) => specRow(l, v)).join('');
+  }
 
   function openDetail(id, { fly = true } = {}) {
     const b = data.buildings.find((x) => x.id === id);
@@ -133,29 +217,16 @@
       <div class="hero" style="${b.photo_url ? `background-image:url('${b.photo_url}')` : ''}"><span class="num ${st}">${b.ord}</span></div>
       <div class="dbody">
         <h2>${esc(b.name || b.address)}</h2>
+        ${b.costar_rating != null ? `<div class="rating-line">${starsHtml(b.costar_rating)}<span class="muted">CoStar rating</span></div>` : ''}
         <div class="addr">${esc(b.address)}, ${esc(b.city || '')}${b.state ? ', ' + esc(b.state) : ''} ${esc(b.zip || '')}${b.submarket ? `<br><span class="pill">${esc(b.submarket)}</span>` : ''}</div>
         <div class="vote-panel">
           <div class="q">Is this building worth a closer look?</div>
           ${voteButtons(b, true)}
-          <textarea id="cmt" placeholder="Optional note for your advisor (e.g. 'love the parking', 'too far from Metro')">${esc(b.vote?.comment || '')}</textarea>
-          <div class="saved" id="savedMsg"></div>
+          ${noteBlock(b, true, true)}
         </div>
         ${b.broker_notes ? `<h3 class="sec">Advisor notes</h3><div class="prose"><p>${esc(b.broker_notes).replace(/\n/g, '<br>')}</p></div>` : ''}
-        <dl class="specs">
-          ${specRow('Available', b.available_size)}
-          ${specRow('Asking rent', b.asking_rent)}
-          ${specRow('Service type', b.service_type)}
-          ${specRow('Occupancy', b.occupancy)}
-          ${specRow('Term', b.term)}
-          ${specRow('Building size', b.rba_sf ? fmtInt(b.rba_sf) + ' SF' : null)}
-          ${specRow('Class', b.building_class)}
-          ${specRow('Type', b.property_type)}
-          ${specRow('Year built', b.year_built)}
-          ${specRow('Renovated', b.renovated)}
-          ${specRow('Stories', b.stories)}
-          ${specRow('Typical floor', b.typical_floor)}
-          ${specRow('Parking', b.parking)}
-        </dl>
+        <h3 class="sec">Property details</h3>
+        <dl class="specs">${detailRows(b)}</dl>
         <h3 class="sec">Available suites (${b.suites.length})</h3>
         ${b.suites.length ? b.suites.map((s) => `
           <div class="suite">
@@ -169,8 +240,21 @@
               ${s.term ? `<span>Term <b>${esc(s.term)}</b></span>` : ''}
               ${s.floor_status ? `<span>${esc(s.floor_status)} floor</span>` : ''}
             </div>
+            ${(() => { const m = monthly(s, b); if (!m) return ''; return `<div class="monthly"><span>Est. monthly <b>${moneyRange(m)}</b></span>
+              <span class="calc">${(() => { const base = m.rLo === m.rHi ? money2(m.rLo) : `${money2(m.rLo)}–${money2(m.rHi)}`;
+                const rate = m.nnnSource === 'advisor' ? `(${base} rent + ${money2(m.nnn)} NNN)` : m.nnnSource === 'estimate' ? `(${base} rent + ${money2(m.nnn)} est. NNN*)` : m.nnnSource === 'missing' ? `${base} rent (+ NNN, not included†)` : `${base} rent`;
+                return `${rate}/SF/yr × ${m.sfLo === m.sfHi ? fmtInt(m.sfLo) : `${fmtInt(m.sfLo)}–${fmtInt(m.sfHi)}`} SF ÷ 12`; })()}</span></div>`; })()}
             ${thumbs(plansBySuite(s.id))}
           </div>`).join('') : '<p class="muted">Contact your advisor for suite details.</p>'}
+        ${(() => {
+          const ms = b.suites.map((s) => monthly(s, b)).filter(Boolean);
+          const notes = [];
+          if (ms.some((m) => m.nnnSource === 'estimate')) notes.push(`* NNN charges (taxes, insurance, common area) are an <b>estimate only</b> of ${money2(Number(data.survey.nnn_estimate))}/SF/yr for this area, not a figure quoted by the landlord. Actual NNN for this building may differ.`);
+          if (ms.some((m) => m.nnnSource === 'advisor')) notes.push(`NNN of ${money2(Number(b.nnn_override))}/SF/yr provided by your advisor for this building.`);
+          if (ms.some((m) => m.nnnSource === 'missing')) notes.push('† This space is quoted triple net (NNN); taxes, insurance and common area charges are extra and not included in the monthly figure.');
+          if (ms.length) notes.push('Monthly figures are base rent estimates before any concessions, escalations or utilities not included in the rent.');
+          return notes.length ? `<div class="cost-notes">${notes.map((n) => `<p>${n}</p>`).join('')}</div>` : '';
+        })()}
         ${plansBySuite(null).length ? `<h3 class="sec">Floor plans</h3>${thumbs(plansBySuite(null))}` : ''}
         ${b.highlights?.length ? `<h3 class="sec">Highlights</h3><div class="prose"><ul>${b.highlights.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
         ${b.overview ? `<h3 class="sec">About the property</h3><div class="prose">${b.overview.split(/\n\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>` : ''}
@@ -180,7 +264,6 @@
     $('#side').classList.add('detail-open');
     $('#side').scrollTop = 0;
     if (fly && markers[id]) map.flyTo(markers[id].getLatLng(), Math.max(map.getZoom(), 15), { duration: 0.6 });
-    $('#cmt').addEventListener('input', debounce(() => sendVote(b, b.vote?.vote ?? 0, $('#cmt').value), 700));
   }
 
   function closeDetail() {
@@ -200,7 +283,7 @@
     refreshPin(b); renderTally();
     const r = await fetch(`${API}/vote`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ building_id: b.id, vote, comment }) });
     if (!r.ok) { b.vote = before; refreshPin(b); renderTally(); alert('Sorry, your vote could not be saved. Please try again.'); return; }
-    const msg = $('#savedMsg'); if (msg) { msg.textContent = 'Saved'; setTimeout(() => { if (msg) msg.textContent = ''; }, 1500); }
+    document.querySelectorAll(`.note-ed[data-bid="${b.id}"] .saved`).forEach((m) => { m.textContent = 'Saved ✓'; setTimeout(() => { m.textContent = ''; }, 1500); });
   }
 
   function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
@@ -213,11 +296,30 @@
       const b = data.buildings.find((x) => x.id === bid);
       const v = Number(vb.dataset.v);
       const nv = b.vote?.vote === v ? 0 : v; // tap again to clear
-      const cmt = $('#cmt') && selected === bid ? $('#cmt').value : undefined;
-      sendVote(b, nv, cmt);
+      sendVote(b, nv, b.vote?.comment ?? undefined);
       vb.closest('.votes').querySelectorAll('.vbtn').forEach((x) => { const on = Number(x.dataset.v) === nv; x.classList.toggle('on', on); x.setAttribute('aria-pressed', on); });
-      if (!$('#listView').hidden) renderList();
-      else { const n = document.querySelector('.hero .num'); if (n) n.className = `num ${state(b)}`; }
+      if (!$('#listView').hidden) { if (nv !== 0 && !b.vote?.comment) openNotes.add(bid); renderList(); }
+      else {
+        const n = document.querySelector('.hero .num'); if (n) n.className = `num ${state(b)}`;
+        const ed = document.querySelector('#detailView .note-ed'); if (ed) ed.outerHTML = noteBlock(b, true, true);
+      }
+      return;
+    }
+    const noteArea = e.target.closest('.note-line, .note-ed');
+    if (noteArea) {
+      e.stopPropagation();
+      const bid = Number(noteArea.dataset.bid);
+      const b = data.buildings.find((x) => x.id === bid);
+      if (e.target.closest('[data-note-open]')) { openNotes.add(bid); renderList(); document.querySelector(`.note-ed[data-bid="${bid}"] textarea`)?.focus(); }
+      else if (e.target.closest('[data-note-close]')) { openNotes.delete(bid); renderList(); }
+      else if (e.target.closest('[data-chip]')) {
+        const chip = e.target.closest('[data-chip]'); const ta = noteArea.querySelector('textarea');
+        const c = chip.dataset.chip; let parts = ta.value.split(/;\s*/).map((x) => x.trim()).filter(Boolean);
+        const has = parts.some((p) => p.toLowerCase() === c.toLowerCase());
+        parts = has ? parts.filter((p) => p.toLowerCase() !== c.toLowerCase()) : [...parts, c];
+        ta.value = parts.join('; '); chip.classList.toggle('on', !has);
+        sendVote(b, b.vote?.vote ?? 0, ta.value);
+      }
       return;
     }
     const card = e.target.closest('.card');
@@ -231,6 +333,12 @@
     const f = e.target.closest('#filters button');
     if (f) { filter = f.dataset.f; renderList(); }
   });
+  const saveNote = debounce((ta) => {
+    const bid = Number(ta.closest('.note-ed').dataset.bid);
+    const b = data.buildings.find((x) => x.id === bid);
+    sendVote(b, b.vote?.vote ?? 0, ta.value);
+  }, 700);
+  document.addEventListener('input', (e) => { if (e.target.classList.contains('note-input')) saveNote(e.target); });
   document.addEventListener('mouseover', (e) => {
     const card = e.target.closest('.card');
     document.querySelectorAll('.pin.hover').forEach((p) => p.classList.remove('hover'));

@@ -5,7 +5,8 @@ const crypto = require('crypto');
 const express = require('express');
 const multer = require('multer');
 const { db, DATA_DIR, surveyDir } = require('./lib/db');
-const { processSurvey } = require('./lib/process');
+const { processSurvey, enrichExisting } = require('./lib/process');
+const { matchSuite } = require('./lib/floorplans');
 const { geocode } = require('./lib/geocode');
 const pdf = require('./lib/pdf');
 
@@ -75,6 +76,8 @@ function surveyPayload(survey, { admin }) {
   const out = buildings.map((b) => ({
     ...b,
     highlights: safeJson(b.highlights, []),
+    details: safeJson(b.details, []),
+    source_pages: undefined, enriched: undefined,
     photo_url: b.photo ? fileBase + b.photo : null,
     listing_page_url: admin && b.listing_page ? fileBase + b.listing_page : undefined,
     listing_page: undefined,
@@ -83,7 +86,7 @@ function surveyPayload(survey, { admin }) {
     floor_plans: plans.filter((f) => f.building_id === b.id).map((f) => ({ id: f.id, suite_id: f.suite_id, caption: f.caption, url: fileBase + f.file })),
     vote: vmap[b.id] || null,
   }));
-  const s = { id: survey.id, title: survey.title, client_name: survey.client_name, status: survey.status, created_at: survey.created_at };
+  const s = { id: survey.id, title: survey.title, client_name: survey.client_name, status: survey.status, created_at: survey.created_at, nnn_estimate: survey.nnn_estimate };
   if (admin) Object.assign(s, { token: survey.token, pdf_name: survey.pdf_name, status_detail: survey.status_detail, view_count: survey.view_count, last_viewed_at: survey.last_viewed_at });
   return { survey: s, buildings: out };
 }
@@ -132,7 +135,10 @@ A.patch('/surveys/:id', (req, res) => {
   const s = getSurvey(req.params.id);
   if (!s) return res.sendStatus(404);
   const { title = s.title, client_name = s.client_name } = req.body;
-  db.prepare('UPDATE surveys SET title = ?, client_name = ? WHERE id = ?').run(title, client_name, s.id);
+  let nnn = 'nnn_estimate' in req.body ? req.body.nnn_estimate : s.nnn_estimate;
+  nnn = nnn === '' || nnn == null ? null : Number(String(nnn).replace(/[$,]/g, ''));
+  if (nnn != null && !(nnn >= 0 && nnn < 1000)) return res.status(400).json({ error: 'Enter NNN as dollars per SF per year, e.g. 9.50' });
+  db.prepare('UPDATE surveys SET title = ?, client_name = ?, nnn_estimate = ? WHERE id = ?').run(title, client_name, nnn, s.id);
   res.json({ ok: true });
 });
 
@@ -155,7 +161,7 @@ A.delete('/surveys/:id', (req, res) => {
 
 const B_EDITABLE = ['name', 'address', 'city', 'state', 'zip', 'submarket', 'property_type', 'building_class', 'rba_sf',
   'year_built', 'renovated', 'stories', 'typical_floor', 'parking', 'available_size', 'asking_rent', 'service_type',
-  'occupancy', 'term', 'overview', 'broker_notes', 'lat', 'lng', 'hidden', 'ord'];
+  'occupancy', 'term', 'overview', 'broker_notes', 'lat', 'lng', 'hidden', 'ord', 'costar_rating', 'nnn_override'];
 const S_EDITABLE = ['address', 'floor', 'floor_status', 'suite', 'space_use', 'lease_type', 'sf', 'floor_contig',
   'bldg_contig', 'rent', 'rent_type', 'occupancy', 'term', 'ord'];
 
@@ -168,6 +174,7 @@ function patch(table, allowed, id, body) {
 
 A.patch('/buildings/:id', (req, res) => {
   const body = { ...req.body };
+  if ('details' in body) db.prepare('UPDATE buildings SET details = ? WHERE id = ?').run(JSON.stringify(body.details || []), req.params.id);
   if ('highlights' in body) db.prepare('UPDATE buildings SET highlights = ? WHERE id = ?').run(JSON.stringify(body.highlights || []), req.params.id);
   if ('lat' in body) db.prepare("UPDATE buildings SET geocode_status = 'manual' WHERE id = ?").run(req.params.id);
   patch('buildings', B_EDITABLE, req.params.id, body);
@@ -222,9 +229,23 @@ A.post('/buildings/:id/floor-plans', imageUpload.single('file'), async (req, res
       fs.copyFileSync(req.file.path, path.join(dir, stem + ext));
       files.push(stem + ext);
     }
+    // No suite chosen: try to work it out from the file name, then from each page's text.
+    const suites = db.prepare('SELECT * FROM suites WHERE building_id = ? ORDER BY ord, id').all(b.id);
+    let pageTexts = [];
+    if (!suiteId && req.file.mimetype === 'application/pdf') pageTexts = await pdf.pageTexts(req.file.path).catch(() => []);
+    const fromName = suiteId ? -1 : matchSuite(req.file.originalname || '', suites);
     const ins = db.prepare('INSERT INTO floor_plans (building_id, suite_id, caption, file) VALUES (?, ?, ?, ?)');
-    files.forEach((f, i) => ins.run(b.id, suiteId, files.length > 1 ? `${caption} (${i + 1})` : caption, f));
-    res.json({ ok: true });
+    let matched = 0;
+    files.forEach((f, i) => {
+      let sid = suiteId;
+      if (!sid) {
+        const idx = pageTexts[i] ? matchSuite(pageTexts[i].split('\n').filter((l) => /floor|suite|ste\b/i.test(l)).join(' '), suites) : -1;
+        const pick = idx >= 0 ? idx : fromName;
+        if (pick >= 0) { sid = suites[pick].id; matched++; }
+      }
+      ins.run(b.id, sid || null, files.length > 1 ? `${caption} (${i + 1})` : caption, f);
+    });
+    return res.json({ ok: true, matched, total: files.length });
   } finally { fs.rmSync(req.file.path, { force: true }); }
 });
 A.patch('/floor-plans/:id', (req, res) => {
@@ -313,5 +334,7 @@ for (const s of db.prepare("SELECT id FROM surveys WHERE status = 'processing'")
   db.prepare('DELETE FROM buildings WHERE survey_id = ?').run(s.id);
   if (fs.existsSync(p)) processSurvey(s.id, p);
 }
+
+enrichExisting().catch((e) => console.error(e));
 
 app.listen(PORT, () => console.log(`Tenant rep survey app on http://localhost:${PORT}`));
