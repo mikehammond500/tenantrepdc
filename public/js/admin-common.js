@@ -18,6 +18,6 @@ function toast(msg) {
   document.body.appendChild(t); setTimeout(() => t.remove(), 1800);
 }
 async function copy(text) {
-  try { await navigator.clipboard.writeText(text); toast('Link copied'); }
+  try { await navigator.clipboard.writeText(text); toast(text.startsWith('http') ? 'Link copied' : 'Copied'); }
   catch { prompt('Copy this link:', text); }
 }

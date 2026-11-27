@@ -15,6 +15,7 @@ const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 if (!ADMIN_PASSWORD) console.warn('WARNING: ADMIN_PASSWORD is not set; admin login is disabled.');
 
+const APP_VERSION = (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || `dev-${Date.now().toString(36)}`;
 const app = express();
 app.disable('x-powered-by');
 app.set('trust proxy', 1);
@@ -22,6 +23,15 @@ app.use(express.json({ limit: '1mb' }));
 app.use((req, res, next) => { res.set('X-Robots-Tag', 'noindex, nofollow'); next(); });
 
 const PUB = path.join(__dirname, 'public');
+// Serve HTML with versioned asset URLs so browsers pick up new JS/CSS right after a deploy.
+const pageCache = {};
+function sendPage(res, rel, status = 200) {
+  if (!pageCache[rel]) {
+    pageCache[rel] = fs.readFileSync(path.join(PUB, rel), 'utf8')
+      .replace(/((?:src|href)="\/(?:js|css)\/[^"?]+)"/g, `$1?v=${APP_VERSION}"`);
+  }
+  res.status(status).set('Cache-Control', 'no-cache').type('html').send(pageCache[rel]);
+}
 const upload = multer({ dest: path.join(DATA_DIR, 'tmp'), limits: { fileSize: 80 * 1024 * 1024 } });
 const newToken = () => crypto.randomBytes(16).toString('base64url'); // 128-bit, 22 chars
 
@@ -60,9 +70,9 @@ app.post('/admin/login', express.urlencoded({ extended: false }), (req, res) => 
   res.redirect('/admin');
 });
 app.post('/admin/logout', (req, res) => { res.clearCookie('tc_admin', { path: '/' }); res.redirect('/admin/login'); });
-app.get('/admin/login', (req, res) => res.sendFile(path.join(PUB, 'admin', 'login.html')));
-app.get('/admin', requireAdmin, (req, res) => res.sendFile(path.join(PUB, 'admin', 'index.html')));
-app.get('/admin/surveys/:id', requireAdmin, (req, res) => res.sendFile(path.join(PUB, 'admin', 'survey.html')));
+app.get('/admin/login', (req, res) => sendPage(res, 'admin/login.html'));
+app.get('/admin', requireAdmin, (req, res) => sendPage(res, 'admin/index.html'));
+app.get('/admin/surveys/:id', requireAdmin, (req, res) => sendPage(res, 'admin/survey.html'));
 
 // ---------- data helpers ----------
 const getSurvey = (id) => db.prepare('SELECT * FROM surveys WHERE id = ?').get(id);
@@ -182,6 +192,35 @@ A.post('/surveys/:id/rotate-link', (req, res) => {
   const token = newToken();
   db.prepare('UPDATE surveys SET token = ? WHERE id = ?').run(token, req.params.id);
   res.json({ token });
+});
+
+// Everything needed to debug an import, as plain text the broker can copy and paste.
+A.get('/surveys/:id/diagnostics', async (req, res) => {
+  const s = getSurvey(req.params.id);
+  if (!s) return res.sendStatus(404);
+  const run = (cmd, args) => new Promise((r) => require('child_process').execFile(cmd, args, (e, out, err) => r(String(out || err || (e && e.message) || '').trim())));
+  const out = [];
+  out.push(`App version: ${APP_VERSION}   Node: ${process.version}`);
+  out.push(`PDF tool: ${(await run('pdftotext', ['-v'])).split('\n')[0]}`);
+  out.push(`Survey ${s.id}: "${s.title}"  status=${s.status}  ${s.status_detail || ''}`);
+  const bs = db.prepare('SELECT * FROM buildings WHERE survey_id = ? ORDER BY ord').all(s.id);
+  out.push(`Buildings: ${bs.length}`);
+  for (const b of bs) {
+    const n = db.prepare('SELECT COUNT(*) AS n FROM suites WHERE building_id = ?').get(b.id).n;
+    const d = safeJson(b.details, []);
+    out.push(`  #${b.ord} ${b.address} | avail=${b.available_size} | rent=${b.asking_rent} | built=${b.year_built} | parking=${b.parking} | stars=${b.costar_rating} | details=${d.length} | suites=${n} | enriched=${b.enriched}`);
+  }
+  const pdfPath = path.join(DATA_DIR, 'files', String(s.id), 'source.pdf');
+  if (fs.existsSync(pdfPath)) {
+    const pages = await pdf.pageTexts(pdfPath).catch((e) => [`(could not read PDF: ${e.message})`]);
+    out.push(`PDF pages: ${pages.length}`);
+    const { extract } = require('./lib/heuristic');
+    const parsed = extract(pages).buildings;
+    out.push(`Parser now finds: ${parsed.length} buildings; first: ${parsed[0] ? `${parsed[0].address}, ${parsed[0].details.length} details, ${parsed[0].suites.length} suites` : 'none'}`);
+    out.push('--- Page 1 text (first 45 lines) ---');
+    out.push(...(pages[0] || '').split('\n').slice(0, 45).map((l) => l.replace(/\s+$/, '').replace(/ /g, '·')));
+  } else out.push('Stored PDF: MISSING');
+  res.type('text').send(out.join('\n'));
 });
 
 A.post('/surveys/:id/reimport', (req, res) => {
@@ -322,9 +361,9 @@ const byToken = (t) => (typeof t === 'string' && /^[\w-]{16,64}$/.test(t)) ? db.
 
 app.get('/s/:token', (req, res) => {
   const s = byToken(req.params.token);
-  if (!s) return res.status(404).sendFile(path.join(PUB, 'notfound.html'));
+  if (!s) return sendPage(res, 'notfound.html', 404);
   if (!isAdmin(req)) db.prepare("UPDATE surveys SET view_count = view_count + 1, last_viewed_at = datetime('now') WHERE id = ?").run(s.id);
-  res.sendFile(path.join(PUB, 'survey.html'));
+  sendPage(res, 'survey.html');
 });
 app.get('/api/s/:token', (req, res) => {
   const s = byToken(req.params.token);
@@ -368,8 +407,8 @@ app.get('/config.js', (req, res) => {
   })};`);
 });
 app.use('/vendor/leaflet', express.static(path.join(__dirname, 'node_modules', 'leaflet', 'dist'), { maxAge: '7d' }));
-app.use(express.static(PUB, { index: false, maxAge: '1h' }));
-app.get('/', (req, res) => res.sendFile(path.join(PUB, 'index.html')));
+app.use(express.static(PUB, { index: false, maxAge: '1y', immutable: true, setHeaders: (res, p) => { if (!/\.(js|css)$/.test(p)) res.set('Cache-Control', 'public, max-age=3600'); } }));
+app.get('/', (req, res) => sendPage(res, 'index.html'));
 app.get('/healthz', (req, res) => res.send('ok'));
 
 // Surveys left mid-processing by a restart: re-run them.

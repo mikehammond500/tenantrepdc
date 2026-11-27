@@ -141,6 +141,10 @@
     if (!confirm('Re-read the original PDF and rebuild this survey\'s buildings?\n\nKept: client votes and notes, your notes to the client, NNN overrides, hidden buildings and pins you placed by hand.\nReplaced: other field edits, suites and floor plans.')) return;
     await api(`/api/admin/surveys/${id}/reimport`, { method: 'POST' }); toast('Re-importing…'); load();
   };
+  async function loadDiag() { $('#diagText').textContent = 'Loading…'; const r = await fetch(`/api/admin/surveys/${id}/diagnostics`); $('#diagText').textContent = await r.text(); }
+  $('#diag').addEventListener('toggle', () => { if ($('#diag').open) loadDiag(); });
+  $('#diagRefresh').onclick = loadDiag;
+  $('#diagCopy').onclick = async () => { if ($('#diagText').textContent === 'Loading…') await loadDiag(); copy($('#diagText').textContent); };
   $('#resetBtn').onclick = async () => { if (!confirm('Clear all of the client\'s votes and notes on this survey?')) return; await api(`/api/admin/surveys/${id}/reset-votes`, { method: 'POST' }); load(); };
   $('#dupBtn').onclick = async () => {
     const title = prompt('Name for the copy (it gets its own private link; client votes are not copied):', `${data.survey.title} (copy)`);

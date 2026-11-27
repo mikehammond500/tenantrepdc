@@ -38,6 +38,11 @@
     </div>
     <div class="ed-map"><div id="map"></div><div class="hint" id="hint" hidden></div></div>
   </div>
+  <details class="panel diag" id="diag"><summary><b>Diagnostics</b> <span class="muted">(for troubleshooting with Claude)</span></summary>
+    <p class="muted" style="font-size:12.5px">Shows the running version and what the server read from this survey's PDF. Click <b>Copy</b> and paste it into your chat with Claude.</p>
+    <div style="display:flex;gap:8px;margin-bottom:8px"><button class="btn small primary" id="diagCopy">Copy</button><button class="btn small" id="diagRefresh">Refresh</button></div>
+    <pre id="diagText">Loading…</pre>
+  </details>
 </main>
 <div class="lightbox" id="lightbox" hidden><div class="lb-bar"><span id="lbCap"></span><button class="btn small" id="lbClose">✕ Close</button></div><div class="lb-scroll"><img id="lbImg" alt=""></div></div>
 <script src="/vendor/leaflet/leaflet.js"></script>
