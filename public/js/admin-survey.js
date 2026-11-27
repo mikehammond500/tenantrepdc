@@ -35,12 +35,27 @@
       : (() => { const miss = data.buildings.filter((b) => b.lat == null).length; return miss ? `<div class="status-banner">${miss} building${miss > 1 ? 's' : ''} could not be located from the address. Open ${miss > 1 ? 'each one' : 'it'} below and use "Place on map by clicking".</div>` : ''; })();
     clearTimeout(pollTimer);
     if (s.status === 'processing') pollTimer = setTimeout(load, 2500);
-    renderResults(); renderBuildings(); renderMap();
+    renderResults(); renderBuildings(); renderMap(); renderRuledOutPanel();
+  }
+
+  const RO_REASONS = ['Too far from Metro', 'Over budget', 'Too small', 'Too large', 'Building too old', 'Not enough parking', 'Space already leased', "Landlord won't do the term", 'Poor condition', 'Not available in time', 'Location / commute'];
+  function renderRuledOutPanel() {
+    $('#roForm .ro-chips').innerHTML = RO_REASONS.map((r) => `<button type="button" class="chip" data-ro-chip="${esc(r)}">${esc(r)}</button>`).join('');
+    const inSurvey = data.buildings.filter((b) => b.ruled_out);
+    const other = data.survey.ruled_out || [];
+    $('#roList').innerHTML = (inSurvey.length || other.length) ? `<table class="ro-table"><thead><tr><th>Building</th><th>Address</th><th>Reason (client sees this)</th><th>Date</th><th></th></tr></thead><tbody>
+      ${inSurvey.map((b) => `<tr data-ro-bid="${b.id}"><td><b>#${b.ord} ${esc(b.name || b.address)}</b><br><span class="muted" style="font-size:11.5px">From this survey</span></td><td>${esc(b.address || '')}</td>
+        <td><textarea data-ro-bf="ruled_out_reason" rows="2">${esc(b.ruled_out_reason || '')}</textarea></td><td class="muted">${fmtDate(b.ruled_out_at)}</td>
+        <td><button class="btn small" data-ro-restore="${b.id}">Restore</button></td></tr>`).join('')}
+      ${other.map((r) => `<tr data-rid="${r.id}"><td><input data-ro-f="name" value="${esc(r.name || '')}" placeholder="Name"></td><td><input data-ro-f="address" value="${esc(r.address || '')}" placeholder="Address"></td>
+        <td><textarea data-ro-f="reason" rows="2">${esc(r.reason || '')}</textarea></td><td class="muted">${fmtDate(r.created_at)}</td>
+        <td><button class="btn small danger" data-ro-del="${r.id}">Delete</button></td></tr>`).join('')}
+      </tbody></table>` : '<p class="muted" style="font-size:13px;margin:6px 0 0">Nothing ruled out yet. Add a building above, or open a building below and click "Rule out…".</p>';
   }
 
   function renderResults() {
     const groups = { u: [], d: [], n: [] };
-    data.buildings.filter((b) => !b.hidden).forEach((b) => groups[st(b)].push(b));
+    data.buildings.filter((b) => !b.hidden && !b.ruled_out).forEach((b) => groups[st(b)].push(b));
     const li = (b) => `<li data-jump="${b.id}"><b>${b.ord}.</b> ${esc(b.name || b.address)}${b.vote?.comment ? `<span class="c">"${esc(b.vote.comment)}"</span>` : ''}</li>`;
     $('#results').innerHTML = `
       <div class="col"><h3><span class="pill up">👍 Liked · ${groups.u.length}</span></h3><ul>${groups.u.map(li).join('') || '<li class="muted">None yet</li>'}</ul></div>
@@ -114,10 +129,11 @@
         <div class="bld-head" data-toggle>
           <div class="ph" style="${b.photo_url ? `background-image:url('${b.photo_url}')` : ''}"><span class="num ${s}">${b.ord}</span></div>
           <div><div class="t">${esc(b.name || b.address || 'Untitled')}${b.costar_rating != null ? ` <span class="astars" title="CoStar rating">${'★'.repeat(b.costar_rating)}${'☆'.repeat(5 - b.costar_rating)}</span>` : ''}</div><div class="s">${esc(b.address || '')}${b.city ? ', ' + esc(b.city) : ''} · ${b.suites.length} suite${b.suites.length === 1 ? '' : 's'}${b.floor_plans.length ? ` · ${b.floor_plans.length} floor plan${b.floor_plans.length > 1 ? 's' : ''}` : ''}</div></div>
-          <div class="right">${s === 'u' ? '<span class="pill up">👍 Liked</span>' : s === 'd' ? '<span class="pill down">👎 Passed</span>' : ''}${b.hidden ? '<span class="pill gray">Hidden from client</span>' : ''}${geo}</div>
+          <div class="right">${s === 'u' ? '<span class="pill up">👍 Liked</span>' : s === 'd' ? '<span class="pill down">👎 Passed</span>' : ''}${b.ruled_out ? '<span class="pill down">Ruled out</span>' : ''}${b.hidden ? '<span class="pill gray">Hidden from client</span>' : ''}${geo}</div>
         </div>
         ${b.vote?.comment ? `<div class="vote-note ${s === 'u' ? 'up' : 'down'}" style="margin:0 10px 10px">Client note: "${esc(b.vote.comment)}"</div>` : ''}
         <div class="bld-body">
+          ${b.ruled_out ? `<div class="ro-note">Ruled out ${fmtDate(b.ruled_out_at)}: the client sees this under "Buildings ruled out", not on the map.<label>Reason<textarea data-f="ruled_out_reason" rows="2">${esc(b.ruled_out_reason || '')}</textarea></label></div>` : ''}
           <div class="fields">${B_FIELDS.map(([k, label, cls = '', type]) => k === 'lat'
             ? `<label>Latitude<input data-f="lat" value="${b.lat == null ? '' : b.lat.toFixed(6)}"></label><label>Longitude<input data-f="lng" value="${b.lng == null ? '' : b.lng.toFixed(6)}"></label>`
             : `<label class="${cls}">${label}${type === 'textarea' ? `<textarea data-f="${k}">${esc(fieldVal(b, k))}</textarea>` : `<input data-f="${k}" value="${esc(fieldVal(b, k))}">`}</label>`).join('')}</div>
@@ -144,6 +160,7 @@
             <button class="btn small" data-act="geocode">Re-locate from address</button>
             <button class="btn small" data-act="place">Place on map by clicking</button>
             ${b.listing_page_url ? `<button class="btn small" data-act="listing" data-src="${b.listing_page_url}">View original CoStar page</button>` : ''}
+            ${b.ruled_out ? '<button class="btn small" data-act="restore">Restore to survey</button>' : '<button class="btn small" data-act="ruleOut">Rule out…</button>'}
             <button class="btn small" data-act="hide">${b.hidden ? 'Show to client' : 'Hide from client'}</button>
             <button class="btn small danger" data-act="delete">Delete building</button>
           </div>
@@ -236,6 +253,12 @@
       if (act === 'delPlan') { const fid = e.target.closest('.plan').dataset.fid; await api(`/api/admin/floor-plans/${fid}`, { method: 'DELETE' }); load(); }
       if (act === 'geocode') { await api(`/api/admin/buildings/${bid}/geocode`, { method: 'POST' }); map._fitted = false; toast('Located'); load(); }
       if (act === 'place') { placing = bid; $('#hint').textContent = `Click the map to place #${b.ord}`; $('#hint').hidden = false; map.getContainer().style.cursor = 'crosshair'; $('.ed-map').scrollIntoView({ behavior: 'smooth' }); }
+      if (act === 'ruleOut') {
+        const reason = prompt(`Rule out ${b.name || b.address}?\n\nIt leaves the client's map and list and moves to "Buildings ruled out". Reason the client will see:`, b.vote?.comment || '');
+        if (reason === null) return;
+        await api(`/api/admin/buildings/${bid}`, { method: 'PATCH', json: { ruled_out: 1, ruled_out_reason: reason.trim() || null } }); toast('Ruled out'); load(); return;
+      }
+      if (act === 'restore') { await api(`/api/admin/buildings/${bid}`, { method: 'PATCH', json: { ruled_out: 0 } }); toast('Restored to survey'); load(); return; }
       if (act === 'makeMain') { await api(`/api/admin/media/${e.target.closest('.mitem').dataset.mid}/make-main`, { method: 'POST' }); toast('Main photo set'); load(); return; }
       if (act === 'toPlan') { await api(`/api/admin/media/${e.target.closest('.mitem').dataset.mid}/to-floor-plan`, { method: 'POST' }); toast('Moved to floor plans'); load(); return; }
       if (act === 'delMedia') { if (!confirm('Delete this item?')) return; await api(`/api/admin/media/${e.target.closest('.mitem').dataset.mid}`, { method: 'DELETE' }); load(); return; }
@@ -288,6 +311,31 @@
   blds.addEventListener('dragleave', (e) => { const z = e.target.closest('.dropzone'); if (z) z.classList.remove('over'); });
   blds.addEventListener('drop', (e) => { const z = e.target.closest('.dropzone'); if (!z) return; e.preventDefault(); z.classList.remove('over'); uploadMedia(Number(z.dataset.drop), [...e.dataTransfer.files]); });
   $('#nnn').addEventListener('change', () => setTimeout(renderBuildings, 300));
+  $('#roForm').addEventListener('click', (e) => {
+    const c = e.target.closest('[data-ro-chip]'); if (!c) return;
+    const ta = $('#roForm [name=reason]'); const parts = ta.value.split(/;\s*/).filter(Boolean);
+    const has = parts.includes(c.dataset.roChip);
+    ta.value = (has ? parts.filter((p) => p !== c.dataset.roChip) : [...parts, c.dataset.roChip]).join('; '); c.classList.toggle('on', !has);
+  });
+  $('#roForm').addEventListener('submit', async (e) => {
+    e.preventDefault(); const f = e.target;
+    try {
+      await api(`/api/admin/surveys/${id}/ruled-out`, { json: { name: f.name.value, address: f.address.value, reason: f.reason.value } });
+      f.reset(); toast('Added to ruled out'); load();
+    } catch (err) { alert(err.message); }
+  });
+  $('#roList').addEventListener('change', async (e) => {
+    const t = e.target;
+    try {
+      if (t.dataset.roF) { const tr = t.closest('tr'); await api(`/api/admin/ruled-out/${tr.dataset.rid}`, { method: 'PATCH', json: { [t.dataset.roF]: t.value } }); toast('Saved'); }
+      if (t.dataset.roBf) { const tr = t.closest('tr'); await api(`/api/admin/buildings/${tr.dataset.roBid}`, { method: 'PATCH', json: { ruled_out_reason: t.value } }); toast('Saved'); }
+    } catch (err) { alert(err.message); }
+  });
+  $('#roList').addEventListener('click', async (e) => {
+    const d = e.target.closest('[data-ro-del]'); const r = e.target.closest('[data-ro-restore]');
+    if (d) { if (!confirm('Remove this building from the ruled-out list?')) return; await api(`/api/admin/ruled-out/${d.dataset.roDel}`, { method: 'DELETE' }); load(); }
+    if (r) { await api(`/api/admin/buildings/${r.dataset.roRestore}`, { method: 'PATCH', json: { ruled_out: 0 } }); toast('Restored to survey'); load(); }
+  });
 
   load();
 })();

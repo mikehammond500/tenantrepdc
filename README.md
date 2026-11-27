@@ -30,6 +30,15 @@ Open a building in the survey editor and drop files on **"Drop building flyers, 
 - The **Monthly cost** box sets this building's NNN (blank = the survey's area estimate) and previews the client's cost table.
 Uploads, tour links, your notes and votes are kept when you **Re-import from PDF**, and copied when you **Duplicate** a survey.
 
+## Buildings ruled out
+- **Rule out a survey building**: in the editor open it and click **Rule out…**, or while logged in, open the client's survey link,
+  click the building and use the yellow **Advisor only → Rule out…** bar (clients never see it). Enter the reason. The building
+  leaves the client's map and list and appears in the fold-out **Buildings ruled out** section at the bottom of their list.
+  **Restore to survey** brings it back.
+- **Buildings outside the survey** (ones a client found online): add them in the editor's **Buildings ruled out** panel with
+  a name, address and reason (one-tap reasons included). The client can search the list.
+- Ruled-out status and reasons are kept on re-import and copied when you duplicate a survey.
+
 ## Settings (environment variables)
 | Variable | Required | Purpose |
 |---|---|---|

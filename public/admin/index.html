@@ -42,7 +42,7 @@ function render() {
     <tr class="click ${s.archived ? 'archived' : ''}" data-id="${s.id}">
       <td><div class="t-title">${esc(s.title)}${s.archived ? ' <span class="pill gray">Archived</span>' : ''}</div><div class="muted" style="font-size:12.5px">${esc(s.client_name || 'No client set')} · created ${fmtDate(s.created_at)}</div>
         ${s.status !== 'ready' ? `<span class="pill ${s.status === 'error' ? 'down' : ''}">${s.status === 'error' ? 'Error' : 'Processing…'}</span>` : ''}</td>
-      <td>${s.building_count}</td>
+      <td>${s.building_count}${s.ruled_out_count ? `<br><span class="muted" style="font-size:12px">${s.ruled_out_count} ruled out</span>` : ''}</td>
       <td><span class="score"><span class="pill up">👍 ${s.up}</span><span class="pill down">👎 ${s.down}</span>${s.building_count - s.up - s.down > 0 ? `<span class="pill gray">${s.building_count - s.up - s.down} unrated</span>` : ''}</span></td>
       <td class="muted" style="font-size:12.5px">${s.view_count ? `${s.view_count} view${s.view_count > 1 ? 's' : ''}, last ${fmtDate(s.last_viewed_at)}` : 'Not opened yet'}${s.last_vote_at ? `<br>Last vote ${fmtDate(s.last_vote_at)}` : ''}</td>
       <td class="acts">

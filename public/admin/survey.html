@@ -38,6 +38,17 @@
     </div>
     <div class="ed-map"><div id="map"></div><div class="hint" id="hint" hidden></div></div>
   </div>
+  <section class="panel ro-panel" id="roPanel">
+    <div class="ro-head"><h3>Buildings ruled out</h3><span class="muted">Shown to the client in a fold-out section at the bottom of their list. Use it for buildings they find online, or ones you've rejected, so you both remember why.</span></div>
+    <form id="roForm" class="ro-form">
+      <input name="name" placeholder="Building name (e.g. The Bethesda Tower)">
+      <input name="address" placeholder="Address (e.g. 7500 Old Georgetown Rd)">
+      <textarea name="reason" rows="2" placeholder="Why it was ruled out"></textarea>
+      <div class="ro-chips">${''}</div>
+      <button class="btn primary small">Add to ruled out</button>
+    </form>
+    <div id="roList"></div>
+  </section>
   <details class="panel diag" id="diag"><summary><b>Diagnostics</b> <span class="muted">(for troubleshooting with Claude)</span></summary>
     <p class="muted" style="font-size:12.5px">Shows the running version and what the server read from this survey's PDF. Click <b>Copy</b> and paste it into your chat with Claude.</p>
     <div style="display:flex;gap:8px;margin-bottom:8px"><button class="btn small primary" id="diagCopy">Copy</button><button class="btn small" id="diagRefresh">Refresh</button></div>

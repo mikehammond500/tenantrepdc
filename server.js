@@ -99,7 +99,8 @@ function surveyPayload(survey, { admin }) {
     media: mediaRows.filter((m) => m.building_id === b.id).map((m) => ({ id: m.id, kind: m.kind, caption: m.caption, url: fileBase + m.file, ...(admin ? { hidden: !!m.hidden, source: m.source, file: m.file } : {}) })),
     vote: vmap[b.id] || null,
   }));
-  const s = { id: survey.id, title: survey.title, client_name: survey.client_name, status: survey.status, created_at: survey.created_at, nnn_estimate: survey.nnn_estimate };
+  const s = { id: survey.id, title: survey.title, client_name: survey.client_name, status: survey.status, created_at: survey.created_at, nnn_estimate: survey.nnn_estimate,
+    ruled_out: db.prepare('SELECT id, name, address, reason, created_at, updated_at FROM ruled_out WHERE survey_id = ? ORDER BY created_at DESC, id DESC').all(survey.id) };
   if (admin) Object.assign(s, { archived: !!survey.archived, token: survey.token, pdf_name: survey.pdf_name, status_detail: survey.status_detail, view_count: survey.view_count, last_viewed_at: survey.last_viewed_at });
   return { survey: s, buildings: out };
 }
@@ -120,7 +121,8 @@ A.use(requireAdmin);
 A.get('/surveys', (req, res) => {
   res.json(db.prepare(`
     SELECT s.id, s.title, s.client_name, s.status, s.status_detail, s.created_at, s.token, s.view_count, s.last_viewed_at, s.archived,
-      (SELECT COUNT(*) FROM buildings b WHERE b.survey_id = s.id AND b.hidden = 0) AS building_count,
+      (SELECT COUNT(*) FROM buildings b WHERE b.survey_id = s.id AND b.hidden = 0 AND b.ruled_out = 0) AS building_count,
+      ((SELECT COUNT(*) FROM buildings b WHERE b.survey_id = s.id AND b.hidden = 0 AND b.ruled_out = 1) + (SELECT COUNT(*) FROM ruled_out r WHERE r.survey_id = s.id)) AS ruled_out_count,
       (SELECT COUNT(*) FROM votes v WHERE v.survey_id = s.id AND v.vote = 1) AS up,
       (SELECT COUNT(*) FROM votes v WHERE v.survey_id = s.id AND v.vote = -1) AS down,
       (SELECT MAX(updated_at) FROM votes v WHERE v.survey_id = s.id) AS last_vote_at
@@ -186,6 +188,9 @@ A.post('/surveys/:id/duplicate', (req, res) => {
         db.prepare('INSERT INTO media (building_id, kind, caption, file, source, hidden, ord) VALUES (?, ?, ?, ?, ?, ?, ?)').run(nb, m.kind, m.caption, m.file, m.source, m.hidden, m.ord);
       }
     }
+    for (const r of db.prepare('SELECT * FROM ruled_out WHERE survey_id = ?').all(s.id)) {
+      db.prepare('INSERT INTO ruled_out (survey_id, name, address, reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(nid, r.name, r.address, r.reason, r.created_at, r.updated_at);
+    }
     return nid;
   });
   // Photos, floor plans and the source PDF live in the survey's folder; copy it.
@@ -229,6 +234,23 @@ A.get('/surveys/:id/diagnostics', async (req, res) => {
   res.type('text').send(out.join('\n'));
 });
 
+// "Buildings ruled out": addresses outside the survey the broker has looked at and rejected, with the reason.
+A.post('/surveys/:id/ruled-out', (req, res) => {
+  if (!getSurvey(req.params.id)) return res.sendStatus(404);
+  const { name = '', address = '', reason = '' } = req.body;
+  if (!String(name).trim() && !String(address).trim()) return res.status(400).json({ error: 'Enter a building name or address.' });
+  const r = db.prepare('INSERT INTO ruled_out (survey_id, name, address, reason) VALUES (?, ?, ?, ?)').run(req.params.id, String(name).trim() || null, String(address).trim() || null, String(reason).trim() || null);
+  res.json({ id: Number(r.lastInsertRowid) });
+});
+A.patch('/ruled-out/:id', (req, res) => {
+  const r = db.prepare('SELECT * FROM ruled_out WHERE id = ?').get(req.params.id);
+  if (!r) return res.sendStatus(404);
+  const { name = r.name, address = r.address, reason = r.reason } = req.body;
+  db.prepare("UPDATE ruled_out SET name = ?, address = ?, reason = ?, updated_at = datetime('now') WHERE id = ?").run(name || null, address || null, reason || null, r.id);
+  res.json({ ok: true });
+});
+A.delete('/ruled-out/:id', (req, res) => { db.prepare('DELETE FROM ruled_out WHERE id = ?').run(req.params.id); res.json({ ok: true }); });
+
 A.post('/surveys/:id/reimport', (req, res) => {
   const s = getSurvey(req.params.id);
   if (!s) return res.sendStatus(404);
@@ -250,7 +272,7 @@ A.delete('/surveys/:id', (req, res) => {
 
 const B_EDITABLE = ['name', 'address', 'city', 'state', 'zip', 'submarket', 'property_type', 'building_class', 'rba_sf',
   'year_built', 'renovated', 'stories', 'typical_floor', 'parking', 'available_size', 'asking_rent', 'service_type',
-  'occupancy', 'term', 'overview', 'broker_notes', 'lat', 'lng', 'hidden', 'ord', 'costar_rating', 'nnn_override', 'tour_url'];
+  'occupancy', 'term', 'overview', 'broker_notes', 'lat', 'lng', 'hidden', 'ord', 'costar_rating', 'nnn_override', 'tour_url', 'ruled_out', 'ruled_out_reason'];
 const S_EDITABLE = ['address', 'floor', 'floor_status', 'suite', 'space_use', 'lease_type', 'sf', 'floor_contig',
   'bldg_contig', 'rent', 'rent_type', 'occupancy', 'term', 'notes', 'ord'];
 
@@ -266,6 +288,7 @@ A.patch('/buildings/:id', (req, res) => {
   if ('details' in body) db.prepare('UPDATE buildings SET details = ? WHERE id = ?').run(JSON.stringify(body.details || []), req.params.id);
   if ('highlights' in body) db.prepare('UPDATE buildings SET highlights = ? WHERE id = ?').run(JSON.stringify(body.highlights || []), req.params.id);
   if ('lat' in body) db.prepare("UPDATE buildings SET geocode_status = 'manual' WHERE id = ?").run(req.params.id);
+  if ('ruled_out' in body) db.prepare(`UPDATE buildings SET ruled_out_at = ${body.ruled_out ? "datetime('now')" : 'NULL'} WHERE id = ?`).run(req.params.id);
   if ('tour_url' in body && body.tour_url) {
     let u = String(body.tour_url).trim();
     if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
@@ -439,7 +462,9 @@ app.get('/api/s/:token', (req, res) => {
   const s = byToken(req.params.token);
   if (!s) return res.sendStatus(404);
   if (s.status !== 'ready') return res.json({ survey: { title: s.title, status: s.status }, buildings: [] });
-  res.json(surveyPayload(s, { admin: false }));
+  const payload = surveyPayload(s, { admin: false });
+  if (isAdmin(req)) payload.broker = { survey_id: s.id }; // broker viewing the client page: show "Rule out" controls
+  res.json(payload);
 });
 app.post('/api/s/:token/vote', (req, res) => {
   const s = byToken(req.params.token);

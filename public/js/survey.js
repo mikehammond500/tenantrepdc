@@ -57,6 +57,8 @@
     const r = await fetch(API);
     if (!r.ok) { $('#surveyTitle').textContent = 'Survey not found'; return; }
     data = await r.json();
+    data.all = data.buildings;
+    data.buildings = data.all.filter((b) => !b.ruled_out);
     document.title = `${data.survey.title} · Tenant Consulting`;
     $('#surveyTitle').textContent = data.survey.title;
     $('#clientLine').textContent = data.survey.client_name ? `Prepared for ${data.survey.client_name}` : 'Property Survey';
@@ -73,6 +75,7 @@
     initMap();
     renderList();
     renderTally();
+    renderRuledOut();
     const m = location.hash.match(/^#b(\d+)$/);
     if (m && data.buildings.find((b) => b.id === Number(m[1]))) openDetail(Number(m[1]), { fly: true });
   }
@@ -152,6 +155,46 @@
     }).join('') : '<li class="empty">No buildings in this view.</li>';
   }
 
+  /** Bottom-of-list section: buildings the advisor ruled out, from the survey or from outside it, with reasons. */
+  function renderRuledOut() {
+    const fromSurvey = data.all.filter((b) => b.ruled_out).map((b) => ({ id: b.id, name: b.name, address: [b.address, b.city].filter(Boolean).join(', '), reason: b.ruled_out_reason, at: b.ruled_out_at, inSurvey: true }));
+    const other = (data.survey.ruled_out || []).map((r) => ({ rid: r.id, name: r.name, address: r.address, reason: r.reason, at: r.created_at }));
+    const items = [...fromSurvey, ...other].sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+    const box = $('#ruledOut');
+    if (!items.length && !data.broker) { box.hidden = true; return; }
+    box.hidden = false;
+    const wasOpen = box.querySelector('details')?.open;
+    const q = (box.querySelector('#roSearch')?.value || '').toLowerCase();
+    const shown = items.filter((x) => !q || `${x.name || ''} ${x.address || ''} ${x.reason || ''}`.toLowerCase().includes(q));
+    const fmtD = (d) => (d ? new Date(d.replace(' ', 'T') + 'Z').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+    box.innerHTML = `<details ${wasOpen || q ? 'open' : ''}><summary><span>Buildings ruled out</span><span class="ro-count">${items.length}</span></summary>
+      <p class="ro-intro">Buildings we've looked at and ruled out, and why. Found one online? Check here first, or ask your advisor.</p>
+      ${items.length > 6 ? `<input id="roSearch" type="search" placeholder="Search name, address or reason" value="${esc(q)}">` : ''}
+      <ul class="ro-list">${shown.map((x) => `<li>
+        <div class="ro-name">${esc(x.name || x.address || 'Building')}</div>
+        ${x.name && x.address ? `<div class="ro-addr">${esc(x.address)}</div>` : ''}
+        ${x.reason ? `<div class="ro-reason">${esc(x.reason)}</div>` : ''}
+        <div class="ro-meta">${x.at ? `Ruled out ${fmtD(x.at)}` : ''}${x.inSurvey ? ` · <button class="linkbtn" data-ro-view="${x.id}">View details</button>` : ''}${data.broker && x.inSurvey ? ` · <button class="linkbtn" data-ro-restore="${x.id}">Restore to survey</button>` : ''}</div>
+      </li>`).join('') || `<li class="muted">${items.length ? 'No matches.' : 'None yet.'}</li>`}</ul></details>`;
+    const inp = box.querySelector('#roSearch');
+    if (inp && q) { inp.focus(); inp.setSelectionRange(q.length, q.length); }
+  }
+
+  async function brokerPatch(bid, body) {
+    const r = await fetch(`/api/admin/buildings/${bid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Could not save. Are you still logged in?');
+  }
+  function applyRuledOut(b, on, reason) {
+    b.ruled_out = on ? 1 : 0; b.ruled_out_reason = on ? reason : b.ruled_out_reason; b.ruled_out_at = on ? new Date().toISOString().slice(0, 19).replace('T', ' ') : null;
+    data.buildings = data.all.filter((x) => !x.ruled_out);
+    if (on) { markers[b.id]?.remove(); delete markers[b.id]; }
+    else if (b.lat != null && !markers[b.id]) {
+      markers[b.id] = L.marker([b.lat, b.lng], { icon: pinIcon(b), riseOnHover: true }).addTo(map)
+        .bindTooltip(`${b.ord}. ${esc(b.name || b.address)}`, { className: 'pin-tip', direction: 'top' }).on('click', () => openDetail(b.id));
+    }
+    renderTally(); renderRuledOut(); if (!$('#listView').hidden) renderList();
+  }
+
   function renderTally() {
     const up = data.buildings.filter((b) => state(b) === 'u').length;
     const down = data.buildings.filter((b) => state(b) === 'd').length;
@@ -179,14 +222,14 @@
   }
 
   function openDetail(id, { fly = true } = {}) {
-    const b = data.buildings.find((x) => x.id === id);
+    const b = data.all.find((x) => x.id === id);
     if (!b) return;
     const prevSel = selected; selected = id;
     if (prevSel) { const pb = data.buildings.find((x) => x.id === prevSel); pb && refreshPin(pb); }
     refreshPin(b);
     history.replaceState(null, '', `#b${id}`);
     const idx = data.buildings.indexOf(b);
-    const prev = data.buildings[idx - 1], next = data.buildings[idx + 1];
+    const prev = idx >= 0 ? data.buildings[idx - 1] : null, next = idx >= 0 ? data.buildings[idx + 1] : null;
     const plansBySuite = (sid) => b.floor_plans.filter((f) => f.suite_id === sid);
     const thumbs = (arr) => arr.length ? `<div class="fp-thumbs">${arr.map((f) => `<button class="fp-thumb" data-src="${f.url}" data-cap="${esc(f.caption || 'Floor plan')}"><img loading="lazy" src="${f.url}" alt=""><span>${esc(f.caption || 'Floor plan')}</span></button>`).join('')}</div>` : '';
     const st = state(b);
@@ -265,6 +308,7 @@
       </div>
       <div class="hero" style="${b.photo_url ? `background-image:url('${b.photo_url}')` : ''}" ${photos.length ? 'data-tab="media" title="See all photos"' : ''}><span class="num ${st}">${b.ord}</span>${photos.length ? `<span class="hero-count">📷 ${photos.length}</span>` : ''}</div>
       <div class="dbody">
+        ${b.ruled_out ? `<div class="ro-banner"><b>Ruled out</b>${b.ruled_out_reason ? `: ${esc(b.ruled_out_reason)}` : ''}</div>` : ''}
         <h2>${esc(b.name || b.address)}</h2>
         ${b.costar_rating != null ? `<div class="rating-line">${starsHtml(b.costar_rating)}<span class="muted">CoStar rating</span></div>` : ''}
         <div class="addr">${esc(b.address)}, ${esc(b.city || '')}${b.state ? ', ' + esc(b.state) : ''} ${esc(b.zip || '')}${b.submarket ? `<br><span class="pill">${esc(b.submarket)}</span>` : ''}</div>
@@ -272,6 +316,7 @@
           ${b.tour_url ? `<a class="btn small tour" href="${esc(b.tour_url)}" target="_blank" rel="noopener">▶ Virtual tour</a>` : ''}
           ${pdfs.map((d) => `<a class="btn small" href="${d.url}" target="_blank" rel="noopener">📄 Flyer</a>`).join('')}
         </div>` : ''}
+        ${data.broker ? `<div class="broker-bar"><span>Advisor only</span>${b.ruled_out ? `<button class="btn small" data-ro-restore="${b.id}">Restore to survey</button>` : `<button class="btn small" data-rule-out="${b.id}">Rule out…</button>`}<a class="btn small" href="/admin/surveys/${data.broker.survey_id}" target="_blank" rel="noopener">Edit</a></div>` : ''}
         <div class="vote-panel">
           <div class="q">Is this building worth a closer look?</div>
           ${voteButtons(b, true)}
@@ -289,7 +334,7 @@
 
   function closeDetail() {
     const prevSel = selected; selected = null;
-    const pb = data.buildings.find((x) => x.id === prevSel); pb && refreshPin(pb);
+    const pb = data.all.find((x) => x.id === prevSel); pb && refreshPin(pb);
     history.replaceState(null, '', location.pathname);
     $('#detailView').hidden = true; $('#listView').hidden = false;
     $('#side').classList.remove('detail-open');
@@ -326,6 +371,22 @@
       }
       return;
     }
+    const ro = e.target.closest('[data-rule-out]');
+    if (ro) {
+      const b = data.all.find((x) => x.id === Number(ro.dataset.ruleOut));
+      const reason = prompt(`Rule out ${b.name || b.address}?\n\nIt leaves the map and list and appears under "Buildings ruled out". Reason the client will see (e.g. "Over budget", "Landlord won't do a 3-year term"):`, b.vote?.comment || '');
+      if (reason === null) return;
+      brokerPatch(b.id, { ruled_out: 1, ruled_out_reason: reason.trim() || null }).then(() => { closeDetail(); applyRuledOut(b, true, reason.trim() || null); }).catch((err) => alert(err.message));
+      return;
+    }
+    const rr = e.target.closest('[data-ro-restore]');
+    if (rr) {
+      const b = data.all.find((x) => x.id === Number(rr.dataset.roRestore));
+      brokerPatch(b.id, { ruled_out: 0 }).then(() => { applyRuledOut(b, false); if (selected === b.id) openDetail(b.id, { fly: false }); else renderList(); }).catch((err) => alert(err.message));
+      return;
+    }
+    const rv = e.target.closest('[data-ro-view]');
+    if (rv) { openDetail(Number(rv.dataset.roView), { fly: false }); return; }
     const noteArea = e.target.closest('.note-line, .note-ed');
     if (noteArea) {
       e.stopPropagation();
@@ -371,7 +432,7 @@
     const b = data.buildings.find((x) => x.id === bid);
     sendVote(b, b.vote?.vote ?? 0, ta.value);
   }, 700);
-  document.addEventListener('input', (e) => { if (e.target.classList.contains('note-input')) saveNote(e.target); });
+  document.addEventListener('input', (e) => { if (e.target.classList.contains('note-input')) saveNote(e.target); if (e.target.id === 'roSearch') renderRuledOut(); });
   document.addEventListener('mouseover', (e) => {
     const card = e.target.closest('.card');
     document.querySelectorAll('.pin.hover').forEach((p) => p.classList.remove('hover'));
