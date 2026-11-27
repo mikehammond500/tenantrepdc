@@ -240,6 +240,7 @@
               ${s.term ? `<span>Term <b>${esc(s.term)}</b></span>` : ''}
               ${s.floor_status ? `<span>${esc(s.floor_status)} floor</span>` : ''}
             </div>
+            ${s.notes ? `<ul class="suite-notes">${s.notes.split('\n').filter(Boolean).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
             ${(() => { const m = monthly(s, b); if (!m) return ''; return `<div class="monthly"><span>Est. monthly <b>${moneyRange(m)}</b></span>
               <span class="calc">${(() => { const base = m.rLo === m.rHi ? money2(m.rLo) : `${money2(m.rLo)}–${money2(m.rHi)}`;
                 const rate = m.nnnSource === 'advisor' ? `(${base} rent + ${money2(m.nnn)} NNN)` : m.nnnSource === 'estimate' ? `(${base} rent + ${money2(m.nnn)} est. NNN*)` : m.nnnSource === 'missing' ? `${base} rent (+ NNN, not included†)` : `${base} rent`;

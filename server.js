@@ -246,7 +246,7 @@ const B_EDITABLE = ['name', 'address', 'city', 'state', 'zip', 'submarket', 'pro
   'year_built', 'renovated', 'stories', 'typical_floor', 'parking', 'available_size', 'asking_rent', 'service_type',
   'occupancy', 'term', 'overview', 'broker_notes', 'lat', 'lng', 'hidden', 'ord', 'costar_rating', 'nnn_override'];
 const S_EDITABLE = ['address', 'floor', 'floor_status', 'suite', 'space_use', 'lease_type', 'sf', 'floor_contig',
-  'bldg_contig', 'rent', 'rent_type', 'occupancy', 'term', 'ord'];
+  'bldg_contig', 'rent', 'rent_type', 'occupancy', 'term', 'notes', 'ord'];
 
 function patch(table, allowed, id, body) {
   const keys = Object.keys(body).filter((k) => allowed.includes(k));

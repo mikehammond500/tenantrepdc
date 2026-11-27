@@ -17,7 +17,7 @@
     ['details', 'All CoStar details shown to the client (one per line, "Label: value")', 'w4', 'textarea'],
   ];
   const S_FIELDS = [['suite', 'Suite', 60], ['floor', 'Floor', 50], ['sf', 'SF', 90], ['rent', 'Rent', 80], ['rent_type', 'Type', 45],
-    ['space_use', 'Use', 100], ['lease_type', 'Lease', 70], ['occupancy', 'Avail.', 90], ['term', 'Term', 90], ['address', 'Address', 130]];
+    ['space_use', 'Use', 100], ['lease_type', 'Lease', 70], ['occupancy', 'Avail.', 90], ['term', 'Term', 90], ['address', 'Address', 130], ['notes', 'Notes', 200]];
 
   async function load() {
     data = await api(`/api/admin/surveys/${id}`);
