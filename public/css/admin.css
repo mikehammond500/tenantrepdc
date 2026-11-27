@@ -104,3 +104,30 @@ details.menu > div button.danger { color: var(--down); }
 .diag { margin-top: 24px; }
 .diag summary { cursor: pointer; }
 .diag pre { max-height: 420px; overflow: auto; background: #fbfaf7; border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 11.5px; line-height: 1.35; white-space: pre; }
+
+.dropzone { display: grid; gap: 3px; justify-items: center; text-align: center; border: 2px dashed #cfc8b8; border-radius: 10px; padding: 16px; background: #fbfaf7; cursor: pointer; font-size: 13px; color: var(--muted); }
+.dropzone b { color: var(--navy); font-size: 14px; }
+.dropzone.over { border-color: var(--gold); background: var(--gold-soft); }
+.dropzone.busy { opacity: .6; pointer-events: none; }
+.dz-hint { font-size: 11.5px; }
+.mgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-top: 10px; }
+.mitem, .plan { border: 1px solid var(--line); border-radius: 8px; overflow: hidden; font-size: 12px; background: #fff; }
+.mitem img { width: 100%; height: 100px; object-fit: cover; display: block; cursor: zoom-in; }
+.mitem.is-main { border-color: var(--gold); box-shadow: 0 0 0 2px var(--gold-soft); }
+.is-hidden img, .is-hidden .pdfbox { opacity: .4; }
+.pdfbox { height: 100px; display: grid; place-items: center; text-decoration: none; font-size: 28px; background: #f4f2ec; }
+.pdfbox span { font-size: 11px; color: var(--muted); padding: 0 6px; text-align: center; word-break: break-all; }
+.mc { padding: 5px; display: grid; gap: 4px; }
+.mc .kind { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.mc input[data-mf=caption] { padding: 3px 5px; font-size: 12px; }
+.hidechk { display: flex !important; gap: 5px; align-items: center; font-size: 12px; color: var(--ink); text-transform: none !important; letter-spacing: 0 !important; }
+.hidechk input { width: auto; }
+.mbtns { display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--navy-2); font-size: 12px; text-decoration: underline; cursor: pointer; }
+.linkbtn.danger { color: var(--down); }
+.costbox { display: grid; gap: 6px; background: #fbfaf7; border: 1px solid var(--line); border-radius: 8px; padding: 10px; }
+.costbox label { display: grid; gap: 3px; font-size: 12.5px; font-weight: 600; color: var(--navy); max-width: 420px; }
+.costbox label .muted { font-weight: 400; }
+.ctab { width: 100%; border-collapse: collapse; font-size: 12.5px; background: #fff; }
+.ctab th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 500; padding: 4px 6px; border-bottom: 1px solid var(--line); }
+.ctab td { padding: 4px 6px; border-bottom: 1px solid var(--line); }

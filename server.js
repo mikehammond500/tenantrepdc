@@ -7,6 +7,7 @@ const multer = require('multer');
 const { db, DATA_DIR, surveyDir, tx } = require('./lib/db');
 const { processSurvey, enrichExisting, reimportSurvey } = require('./lib/process');
 const { matchSuite } = require('./lib/floorplans');
+const media = require('./lib/media');
 const { geocode } = require('./lib/geocode');
 const pdf = require('./lib/pdf');
 
@@ -79,7 +80,8 @@ const getSurvey = (id) => db.prepare('SELECT * FROM surveys WHERE id = ?').get(i
 function surveyPayload(survey, { admin }) {
   const buildings = db.prepare(`SELECT * FROM buildings WHERE survey_id = ? ${admin ? '' : 'AND hidden = 0'} ORDER BY ord, id`).all(survey.id);
   const suites = db.prepare('SELECT s.* FROM suites s JOIN buildings b ON b.id = s.building_id WHERE b.survey_id = ? ORDER BY s.ord, s.id').all(survey.id);
-  const plans = db.prepare('SELECT f.* FROM floor_plans f JOIN buildings b ON b.id = f.building_id WHERE b.survey_id = ? ORDER BY f.id').all(survey.id);
+  const plans = db.prepare(`SELECT f.* FROM floor_plans f JOIN buildings b ON b.id = f.building_id WHERE b.survey_id = ? ${admin ? '' : 'AND f.hidden = 0'} ORDER BY f.id`).all(survey.id);
+  const mediaRows = db.prepare(`SELECT m.* FROM media m JOIN buildings b ON b.id = m.building_id WHERE b.survey_id = ? ${admin ? '' : 'AND m.hidden = 0'} ORDER BY CASE m.kind WHEN 'photo' THEN 0 WHEN 'flyer_page' THEN 1 ELSE 2 END, m.ord, m.id`).all(survey.id);
   const votes = db.prepare('SELECT building_id, vote, comment, updated_at FROM votes WHERE survey_id = ?').all(survey.id);
   const vmap = Object.fromEntries(votes.map((v) => [v.building_id, v]));
   const fileBase = admin ? `/admin/files/${survey.id}/` : `/s/${survey.token}/files/`;
@@ -93,7 +95,8 @@ function surveyPayload(survey, { admin }) {
     listing_page: undefined,
     broker_notes: b.broker_notes,
     suites: suites.filter((s) => s.building_id === b.id),
-    floor_plans: plans.filter((f) => f.building_id === b.id).map((f) => ({ id: f.id, suite_id: f.suite_id, caption: f.caption, url: fileBase + f.file })),
+    floor_plans: plans.filter((f) => f.building_id === b.id).map((f) => ({ id: f.id, suite_id: f.suite_id, caption: f.caption, url: fileBase + f.file, ...(admin ? { hidden: !!f.hidden, source: f.source } : {}) })),
+    media: mediaRows.filter((m) => m.building_id === b.id).map((m) => ({ id: m.id, kind: m.kind, caption: m.caption, url: fileBase + m.file, ...(admin ? { hidden: !!m.hidden, source: m.source, file: m.file } : {}) })),
     vote: vmap[b.id] || null,
   }));
   const s = { id: survey.id, title: survey.title, client_name: survey.client_name, status: survey.status, created_at: survey.created_at, nnn_estimate: survey.nnn_estimate };
@@ -177,7 +180,10 @@ A.post('/surveys/:id/duplicate', (req, res) => {
           .run(nb, ...scols.map((c) => su[c])).lastInsertRowid);
       }
       for (const f of db.prepare('SELECT * FROM floor_plans WHERE building_id = ?').all(b.id)) {
-        db.prepare('INSERT INTO floor_plans (building_id, suite_id, caption, file) VALUES (?, ?, ?, ?)').run(nb, f.suite_id ? suiteMap[f.suite_id] ?? null : null, f.caption, f.file);
+        db.prepare('INSERT INTO floor_plans (building_id, suite_id, caption, file, source, hidden) VALUES (?, ?, ?, ?, ?, ?)').run(nb, f.suite_id ? suiteMap[f.suite_id] ?? null : null, f.caption, f.file, f.source, f.hidden);
+      }
+      for (const m of db.prepare('SELECT * FROM media WHERE building_id = ?').all(b.id)) {
+        db.prepare('INSERT INTO media (building_id, kind, caption, file, source, hidden, ord) VALUES (?, ?, ?, ?, ?, ?, ?)').run(nb, m.kind, m.caption, m.file, m.source, m.hidden, m.ord);
       }
     }
     return nid;
@@ -244,7 +250,7 @@ A.delete('/surveys/:id', (req, res) => {
 
 const B_EDITABLE = ['name', 'address', 'city', 'state', 'zip', 'submarket', 'property_type', 'building_class', 'rba_sf',
   'year_built', 'renovated', 'stories', 'typical_floor', 'parking', 'available_size', 'asking_rent', 'service_type',
-  'occupancy', 'term', 'overview', 'broker_notes', 'lat', 'lng', 'hidden', 'ord', 'costar_rating', 'nnn_override'];
+  'occupancy', 'term', 'overview', 'broker_notes', 'lat', 'lng', 'hidden', 'ord', 'costar_rating', 'nnn_override', 'tour_url'];
 const S_EDITABLE = ['address', 'floor', 'floor_status', 'suite', 'space_use', 'lease_type', 'sf', 'floor_contig',
   'bldg_contig', 'rent', 'rent_type', 'occupancy', 'term', 'notes', 'ord'];
 
@@ -260,6 +266,12 @@ A.patch('/buildings/:id', (req, res) => {
   if ('details' in body) db.prepare('UPDATE buildings SET details = ? WHERE id = ?').run(JSON.stringify(body.details || []), req.params.id);
   if ('highlights' in body) db.prepare('UPDATE buildings SET highlights = ? WHERE id = ?').run(JSON.stringify(body.highlights || []), req.params.id);
   if ('lat' in body) db.prepare("UPDATE buildings SET geocode_status = 'manual' WHERE id = ?").run(req.params.id);
+  if ('tour_url' in body && body.tour_url) {
+    let u = String(body.tour_url).trim();
+    if (!/^https?:\/\//i.test(u)) u = `https://${u}`;
+    try { const parsed = new URL(u); if (!/^https?:$/.test(parsed.protocol)) throw 0; body.tour_url = parsed.href; }
+    catch { return res.status(400).json({ error: 'That doesn\'t look like a web link. Paste the full virtual tour address, e.g. https://my.matterport.com/show/?m=…' }); }
+  }
   patch('buildings', B_EDITABLE, req.params.id, body);
   res.json({ ok: true });
 });
@@ -294,6 +306,62 @@ A.post('/buildings/:id/photo', imageUpload.single('file'), (req, res) => {
   res.json({ ok: true });
 });
 
+// Flyers, brochures, photos and plan sets for one building (several files at once).
+const mediaUpload = multer({ dest: path.join(DATA_DIR, 'tmp'), limits: { fileSize: 60 * 1024 * 1024, files: 30 } });
+A.post('/buildings/:id/media', mediaUpload.array('files', 30), async (req, res) => {
+  const b = db.prepare('SELECT * FROM buildings WHERE id = ?').get(req.params.id);
+  if (!b) return res.sendStatus(404);
+  const dir = surveyDir(b.survey_id);
+  const suites = db.prepare('SELECT * FROM suites WHERE building_id = ? ORDER BY ord, id').all(b.id);
+  const added = { photos: 0, flyer_pages: 0, pdfs: 0, floor_plans: 0, matched: 0 }, errors = [];
+  const maxOrd = db.prepare('SELECT COALESCE(MAX(ord), 0) AS m FROM media WHERE building_id = ?').get(b.id).m;
+  let ord = maxOrd;
+  for (const f of req.files || []) {
+    try {
+      const r = await media.ingest(f, b, suites, dir);
+      for (const m of r.media) {
+        db.prepare('INSERT INTO media (building_id, kind, caption, file, source, ord, hidden) VALUES (?, ?, ?, ?, ?, ?, ?)').run(b.id, m.kind, m.caption, m.file, m.source, ++ord, m.hidden ? 1 : 0);
+        if (m.hidden) added.hidden = (added.hidden || 0) + 1;
+        added[m.kind === 'photo' ? 'photos' : m.kind === 'pdf' ? 'pdfs' : 'flyer_pages']++;
+      }
+      for (const p of r.plans) {
+        if (p.suite_id == null && r.plans.some((q) => q.file === p.file && q.suite_id != null)) continue;
+        db.prepare("INSERT INTO floor_plans (building_id, suite_id, caption, file, source) VALUES (?, ?, ?, ?, 'upload')").run(b.id, p.suite_id, p.caption, p.file);
+        added.floor_plans++; if (p.suite_id) added.matched++;
+      }
+      // First photo for a building that has none becomes its main photo.
+      const firstPhoto = r.media.find((m) => m.kind === 'photo');
+      if (firstPhoto && !db.prepare('SELECT photo FROM buildings WHERE id = ?').get(b.id).photo) db.prepare('UPDATE buildings SET photo = ? WHERE id = ?').run(firstPhoto.file, b.id);
+    } catch (e) { errors.push(e.message.split('\n')[0]); }
+    finally { fs.rmSync(f.path, { force: true }); }
+  }
+  res.json({ added, errors });
+});
+A.patch('/media/:id', (req, res) => {
+  const m = db.prepare('SELECT * FROM media WHERE id = ?').get(req.params.id);
+  if (!m) return res.sendStatus(404);
+  const { caption = m.caption, hidden = m.hidden, kind = m.kind } = req.body;
+  if (!['photo', 'flyer_page', 'pdf'].includes(kind)) return res.status(400).json({ error: 'bad kind' });
+  db.prepare('UPDATE media SET caption = ?, hidden = ?, kind = ? WHERE id = ?').run(caption, hidden ? 1 : 0, kind, m.id);
+  res.json({ ok: true });
+});
+A.post('/media/:id/make-main', (req, res) => {
+  const m = db.prepare('SELECT * FROM media WHERE id = ?').get(req.params.id);
+  if (!m || m.kind === 'pdf') return res.sendStatus(400);
+  db.prepare('UPDATE buildings SET photo = ? WHERE id = ?').run(m.file, m.building_id);
+  res.json({ ok: true });
+});
+A.post('/media/:id/to-floor-plan', (req, res) => {
+  const m = db.prepare('SELECT * FROM media WHERE id = ?').get(req.params.id);
+  if (!m || m.kind === 'pdf') return res.sendStatus(400);
+  const suites = db.prepare('SELECT * FROM suites WHERE building_id = ? ORDER BY ord, id').all(m.building_id);
+  const i = matchSuite(m.caption || '', suites);
+  db.prepare("INSERT INTO floor_plans (building_id, suite_id, caption, file, source, hidden) VALUES (?, ?, ?, ?, 'upload', ?)").run(m.building_id, i >= 0 ? suites[i].id : null, m.caption || 'Floor plan', m.file, m.hidden);
+  db.prepare('DELETE FROM media WHERE id = ?').run(m.id);
+  res.json({ ok: true });
+});
+A.delete('/media/:id', (req, res) => { db.prepare('DELETE FROM media WHERE id = ?').run(req.params.id); res.json({ ok: true }); });
+
 A.post('/buildings/:id/floor-plans', imageUpload.single('file'), async (req, res) => {
   const b = db.prepare('SELECT * FROM buildings WHERE id = ?').get(req.params.id);
   if (!b || !req.file) return res.sendStatus(400);
@@ -317,7 +385,7 @@ A.post('/buildings/:id/floor-plans', imageUpload.single('file'), async (req, res
     let pageTexts = [];
     if (!suiteId && req.file.mimetype === 'application/pdf') pageTexts = await pdf.pageTexts(req.file.path).catch(() => []);
     const fromName = suiteId ? -1 : matchSuite(req.file.originalname || '', suites);
-    const ins = db.prepare('INSERT INTO floor_plans (building_id, suite_id, caption, file) VALUES (?, ?, ?, ?)');
+    const ins = db.prepare("INSERT INTO floor_plans (building_id, suite_id, caption, file, source) VALUES (?, ?, ?, ?, 'upload')");
     let matched = 0;
     files.forEach((f, i) => {
       let sid = suiteId;
@@ -332,8 +400,10 @@ A.post('/buildings/:id/floor-plans', imageUpload.single('file'), async (req, res
   } finally { fs.rmSync(req.file.path, { force: true }); }
 });
 A.patch('/floor-plans/:id', (req, res) => {
-  const { caption, suite_id } = req.body;
-  db.prepare('UPDATE floor_plans SET caption = COALESCE(?, caption), suite_id = ? WHERE id = ?').run(caption ?? null, suite_id || null, req.params.id);
+  const fp = db.prepare('SELECT * FROM floor_plans WHERE id = ?').get(req.params.id);
+  if (!fp) return res.sendStatus(404);
+  const { caption = fp.caption, suite_id = fp.suite_id, hidden = fp.hidden } = req.body;
+  db.prepare('UPDATE floor_plans SET caption = ?, suite_id = ?, hidden = ? WHERE id = ?').run(caption, suite_id || null, hidden ? 1 : 0, fp.id);
   res.json({ ok: true });
 });
 A.delete('/floor-plans/:id', (req, res) => { db.prepare('DELETE FROM floor_plans WHERE id = ?').run(req.params.id); res.json({ ok: true }); });

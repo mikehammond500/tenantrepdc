@@ -11,7 +11,8 @@
     ['available_size', 'Available'], ['asking_rent', 'Asking rent'], ['service_type', 'Service type'], ['occupancy', 'Occupancy'],
     ['term', 'Term'], ['property_type', 'Property type'], ['building_class', 'Class'], ['rba_sf', 'Building SF'],
     ['year_built', 'Year built'], ['renovated', 'Renovated'], ['stories', 'Stories'], ['typical_floor', 'Typical floor'],
-    ['parking', 'Parking'], ['costar_rating', 'CoStar stars (0-5)'], ['nnn_override', 'NNN $/SF/yr (overrides area estimate)'], ['ord', 'Pin #'], ['lat', 'Latitude'],
+    ['parking', 'Parking'], ['costar_rating', 'CoStar stars (0-5)'], ['ord', 'Pin #'], ['lat', 'Latitude'],
+    ['tour_url', 'Virtual tour link (Matterport, YouTube, etc.)', 'w4'],
     ['broker_notes', 'Your notes to the client (shown on the survey)', 'w4', 'textarea'],
     ['overview', 'Property overview', 'w4', 'textarea'], ['highlights', 'Highlights (one per line)', 'w4', 'textarea'],
     ['details', 'All CoStar details shown to the client (one per line, "Label: value")', 'w4', 'textarea'],
@@ -53,6 +54,58 @@
     return b[k] ?? '';
   }
 
+  /** NNN entry + a live preview of what the client's "Monthly cost" tab will show. */
+  function costPanel(b) {
+    const area = data.survey.nnn_estimate;
+    const rows = b.suites.map((s) => ({ s, m: window.Cost.monthly(s, b, area) })).filter((x) => x.m);
+    const anyNNN = b.suites.some((s) => window.Cost.isNNN(s, b));
+    const src = b.nnn_override != null && b.nnn_override !== '' ? 'Your figure for this building (shown to client without the "estimate" note)'
+      : area != null && area !== '' ? `Area estimate $${Number(area).toFixed(2)} from the top of this page (client sees it marked "estimate only")` : 'None set; NNN spaces show base rent only';
+    return `<div class="sub"><span>Monthly cost</span></div>
+      <div class="costbox">
+        <label>NNN for this building, $/SF/yr <span class="muted">(leave blank to use the area estimate)</span>
+          <input data-f="nnn_override" inputmode="decimal" placeholder="${area != null && area !== '' ? `area estimate: ${Number(area).toFixed(2)}` : 'e.g. 11.25'}" value="${b.nnn_override ?? ''}"></label>
+        <div class="muted" style="font-size:12px">${anyNNN ? `NNN used: ${src}` : 'No spaces here are quoted NNN, so NNN is not added.'}</div>
+        ${rows.length ? `<table class="ctab"><thead><tr><th>Space</th><th>SF</th><th>Rent</th><th>NNN</th><th>Monthly</th></tr></thead><tbody>${rows.map(({ s, m }) => `<tr><td>${esc(s.suite ? 'Suite ' + s.suite : s.floor || 'Space')}</td><td>${m.sfLo === m.sfHi ? m.sfLo.toLocaleString() : m.sfLo.toLocaleString() + '–' + m.sfHi.toLocaleString()}</td><td>${window.Cost.range(m.rLo, m.rHi, window.Cost.money2)}</td><td>${m.nnnSource === 'advisor' ? window.Cost.money2(m.nnn) : m.nnnSource === 'estimate' ? window.Cost.money2(m.nnn) + ' est.' : m.nnnSource === 'missing' ? 'not set' : '—'}</td><td><b>${window.Cost.range(m.lo, m.hi)}</b></td></tr>`).join('')}</tbody></table>`
+          : '<div class="muted" style="font-size:12.5px">No monthly figures: suites need a rent and SF.</div>'}
+      </div>`;
+  }
+
+  function mediaGrid(b) {
+    const items = b.media || [];
+    if (!items.length) return '';
+    const label = { photo: 'Photo', flyer_page: 'Flyer page', pdf: 'PDF download' };
+    return `<div class="mgrid">${items.map((m) => `<div class="mitem ${m.hidden ? 'is-hidden' : ''} ${b.photo_url === m.url ? 'is-main' : ''}" data-mid="${m.id}">
+        ${m.kind === 'pdf' ? `<a class="pdfbox" href="${m.url}" target="_blank" rel="noopener">📄<span>${esc(m.source || 'PDF')}</span></a>` : `<img src="${m.url}" alt="" data-view="${m.url}" data-cap="${esc(m.caption || '')}">`}
+        <div class="mc">
+          <span class="kind">${label[m.kind]}${b.photo_url === m.url ? ' · Main photo' : ''}</span>
+          <input data-mf="caption" value="${esc(m.caption || '')}" placeholder="Caption">
+          <label class="hidechk"><input type="checkbox" data-mf="hidden" ${m.hidden ? 'checked' : ''}> Hide from client</label>
+          <div class="mbtns">
+            ${m.kind !== 'pdf' && b.photo_url !== m.url ? '<button class="linkbtn" data-act="makeMain">Make main photo</button>' : ''}
+            ${m.kind !== 'pdf' ? '<button class="linkbtn" data-act="toPlan">Move to floor plans</button>' : ''}
+            <button class="linkbtn danger" data-act="delMedia">Delete</button>
+          </div>
+        </div></div>`).join('')}</div>`;
+  }
+
+  async function uploadMedia(bid, files) {
+    if (!files.length) return;
+    const fd = new FormData(); for (const f of files) fd.append('files', f);
+    const zone = document.querySelector(`[data-drop="${bid}"]`);
+    zone?.classList.add('busy'); toast(`Processing ${files.length} file${files.length > 1 ? 's' : ''}…`);
+    try {
+      const r = await fetch(`/api/admin/buildings/${bid}/media`, { method: 'POST', body: fd });
+      const res = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(res.error || 'Upload failed');
+      const a = res.added || {};
+      const parts = [a.photos && `${a.photos} photo${a.photos > 1 ? 's' : ''}`, a.floor_plans && `${a.floor_plans} floor plan link${a.floor_plans > 1 ? 's' : ''} (${a.matched} matched to suites)`, a.flyer_pages && `${a.flyer_pages} flyer page${a.flyer_pages > 1 ? 's' : ''}`, a.pdfs && `${a.pdfs} PDF`].filter(Boolean);
+      alert(`Added ${parts.join(', ') || 'nothing'}.${a.hidden ? `\n\n${a.hidden} item(s) show listing-broker contact details and were hidden from the client. Untick "Hide from client" to show them.` : ''}${res.errors?.length ? `\n\nProblems:\n• ${res.errors.join('\n• ')}` : ''}`);
+    } catch (err) { alert(err.message); }
+    zone?.classList.remove('busy');
+    open.add(bid); load();
+  }
+
   function renderBuildings() {
     $('#blds').innerHTML = data.buildings.map((b) => {
       const s = st(b);
@@ -72,11 +125,20 @@
           <table class="suites"><thead><tr>${S_FIELDS.map(([, l]) => `<th>${l}</th>`).join('')}<th></th></tr></thead><tbody>
             ${b.suites.map((su) => `<tr data-sid="${su.id}">${S_FIELDS.map(([k, , w]) => `<td><input data-sf="${k}" value="${esc(su[k] ?? '')}" style="min-width:${w}px"></td>`).join('')}<td><button class="btn small danger" data-act="delSuite" title="Remove suite">×</button></td></tr>`).join('')}
           </tbody></table>
-          <div class="sub"><span>Floor plans</span><label class="btn small" style="text-transform:none;letter-spacing:0;font-weight:500">+ Upload (PDF or image)<input type="file" accept="application/pdf,image/*" data-act="uploadPlan" hidden></label></div>
-          <div class="plans">${b.floor_plans.map((f) => `<div class="plan" data-fid="${f.id}"><img src="${f.url}" alt="" data-view="${f.url}" data-cap="${esc(f.caption || 'Floor plan')}" style="cursor:zoom-in"><div class="pc">
+          ${costPanel(b)}
+          <div class="sub"><span>Flyers, photos &amp; floor plans</span></div>
+          <label class="dropzone" data-drop="${b.id}">
+            <input type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp" data-act="uploadMedia" hidden>
+            <b>Drop building flyers, photos or floor plans here</b><span>or click to choose files: PDF, JPG, PNG. Several at once is fine.</span>
+            <span class="dz-hint">Flyer PDFs are split into photos, floor plans (matched to suites) and flyer pages. Pages and PDFs showing listing-broker contacts start hidden from the client.</span>
+          </label>
+          ${mediaGrid(b)}
+          <div class="sub"><span>Floor plans (${b.floor_plans.length})</span></div>
+          <div class="plans">${b.floor_plans.map((f) => `<div class="plan ${f.hidden ? 'is-hidden' : ''}" data-fid="${f.id}"><img src="${f.url}" alt="" data-view="${f.url}" data-cap="${esc(f.caption || 'Floor plan')}" style="cursor:zoom-in"><div class="pc">
             <input data-pf="caption" value="${esc(f.caption || '')}" placeholder="Caption">
             <select data-pf="suite_id"><option value="">Whole building</option>${b.suites.map((su) => `<option value="${su.id}" ${su.id === f.suite_id ? 'selected' : ''}>Suite ${esc(su.suite || su.floor || su.id)}</option>`).join('')}</select>
-            <button class="btn small danger" data-act="delPlan">Remove</button></div></div>`).join('') || '<span class="muted" style="font-size:13px">None. Upload one and link it to a suite.</span>'}</div>
+            <label class="hidechk"><input type="checkbox" data-pf="hidden" ${f.hidden ? 'checked' : ''}> Hide from client</label>
+            <button class="btn small danger" data-act="delPlan">Remove</button></div></div>`).join('') || '<span class="muted" style="font-size:13px">None yet. Drop a flyer or plan above.</span>'}</div>
           <div class="actions">
             <label class="btn small">Replace photo<input type="file" accept="image/*" data-act="photo" hidden></label>
             <button class="btn small" data-act="geocode">Re-locate from address</button>
@@ -174,6 +236,9 @@
       if (act === 'delPlan') { const fid = e.target.closest('.plan').dataset.fid; await api(`/api/admin/floor-plans/${fid}`, { method: 'DELETE' }); load(); }
       if (act === 'geocode') { await api(`/api/admin/buildings/${bid}/geocode`, { method: 'POST' }); map._fitted = false; toast('Located'); load(); }
       if (act === 'place') { placing = bid; $('#hint').textContent = `Click the map to place #${b.ord}`; $('#hint').hidden = false; map.getContainer().style.cursor = 'crosshair'; $('.ed-map').scrollIntoView({ behavior: 'smooth' }); }
+      if (act === 'makeMain') { await api(`/api/admin/media/${e.target.closest('.mitem').dataset.mid}/make-main`, { method: 'POST' }); toast('Main photo set'); load(); return; }
+      if (act === 'toPlan') { await api(`/api/admin/media/${e.target.closest('.mitem').dataset.mid}/to-floor-plan`, { method: 'POST' }); toast('Moved to floor plans'); load(); return; }
+      if (act === 'delMedia') { if (!confirm('Delete this item?')) return; await api(`/api/admin/media/${e.target.closest('.mitem').dataset.mid}`, { method: 'DELETE' }); load(); return; }
       if (act === 'listing') { showImage(e.target.closest('[data-act]').dataset.src, `Original CoStar page · ${b.name || b.address}`); return; }
       if (act === 'hide') { await api(`/api/admin/buildings/${bid}`, { method: 'PATCH', json: { hidden: b.hidden ? 0 : 1 } }); load(); }
       if (act === 'delete') { if (!confirm(`Delete ${b.name || b.address} from this survey?`)) return; await api(`/api/admin/buildings/${bid}`, { method: 'DELETE' }); load(); }
@@ -192,12 +257,20 @@
         await api(`/api/admin/buildings/${bid}`, { method: 'PATCH', json: { [t.dataset.f]: v } });
         const b = data.buildings.find((x) => x.id === bid); b[t.dataset.f] = v;
         if (['lat', 'lng', 'ord', 'name', 'address'].includes(t.dataset.f)) { renderMap(); }
+        if (t.dataset.f === 'nnn_override') renderBuildings();
         toast('Saved');
       } else if (t.dataset.sf) {
         await api(`/api/admin/suites/${t.closest('tr').dataset.sid}`, { method: 'PATCH', json: { [t.dataset.sf]: t.value } }); toast('Saved');
       } else if (t.dataset.pf) {
         const plan = t.closest('.plan');
-        await api(`/api/admin/floor-plans/${plan.dataset.fid}`, { method: 'PATCH', json: { caption: plan.querySelector('[data-pf=caption]').value, suite_id: plan.querySelector('[data-pf=suite_id]').value || null } }); toast('Saved');
+        await api(`/api/admin/floor-plans/${plan.dataset.fid}`, { method: 'PATCH', json: { caption: plan.querySelector('[data-pf=caption]').value, suite_id: plan.querySelector('[data-pf=suite_id]').value || null, hidden: plan.querySelector('[data-pf=hidden]').checked } });
+        plan.classList.toggle('is-hidden', plan.querySelector('[data-pf=hidden]').checked); toast('Saved');
+      } else if (t.dataset.mf) {
+        const it = t.closest('.mitem');
+        await api(`/api/admin/media/${it.dataset.mid}`, { method: 'PATCH', json: { caption: it.querySelector('[data-mf=caption]').value, hidden: it.querySelector('[data-mf=hidden]').checked } });
+        it.classList.toggle('is-hidden', it.querySelector('[data-mf=hidden]').checked); toast('Saved');
+      } else if (t.dataset.act === 'uploadMedia') {
+        await uploadMedia(bid, [...t.files]); t.value = '';
       } else if (t.dataset.act === 'photo' || t.dataset.act === 'uploadPlan') {
         const fd = new FormData(); fd.append('file', t.files[0]);
         if (t.dataset.act === 'uploadPlan') fd.append('caption', t.files[0].name.replace(/\.\w+$/, ''));
@@ -210,6 +283,11 @@
       }
     } catch (err) { alert(err.message); }
   });
+
+  blds.addEventListener('dragover', (e) => { const z = e.target.closest('.dropzone'); if (z) { e.preventDefault(); z.classList.add('over'); } });
+  blds.addEventListener('dragleave', (e) => { const z = e.target.closest('.dropzone'); if (z) z.classList.remove('over'); });
+  blds.addEventListener('drop', (e) => { const z = e.target.closest('.dropzone'); if (!z) return; e.preventDefault(); z.classList.remove('over'); uploadMedia(Number(z.dataset.drop), [...e.dataTransfer.files]); });
+  $('#nnn').addEventListener('change', () => setTimeout(renderBuildings, 300));
 
   load();
 })();

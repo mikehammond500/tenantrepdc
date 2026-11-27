@@ -19,6 +19,17 @@ You see every vote on the admin dashboard.
 4. **Copy** the private link and send it to the client.
 5. Watch the votes come in on the dashboard. **New link** turns off the old link immediately.
 
+## Building flyers, photos and virtual tours
+Open a building in the survey editor and drop files on **"Drop building flyers, photos or floor plans here"**:
+- **Flyer PDFs** are read page by page. Floor plan images are cut out with their captions ("Second Floor · Suite 200 · Suite 210")
+  and attached to every suite named. Gallery photos keep their captions ("Lobby"). Every page is also kept as a flyer page,
+  and the PDF is offered as a download. Pages or PDFs showing listing-broker emails or phone numbers start **hidden from the client**.
+- **JPG/PNG/WebP photos** go into the building's gallery. Name a file with "plan" (e.g. `Suite 350 floor plan.png`) to file it as a floor plan.
+- Every item has **Hide from client**, **Make main photo**, **Move to floor plans** and **Delete**.
+- Paste a **Virtual tour link** (Matterport, YouTube…) in the building's fields to show a "Virtual tour" button.
+- The **Monthly cost** box sets this building's NNN (blank = the survey's area estimate) and previews the client's cost table.
+Uploads, tour links, your notes and votes are kept when you **Re-import from PDF**, and copied when you **Duplicate** a survey.
+
 ## Settings (environment variables)
 | Variable | Required | Purpose |
 |---|---|---|

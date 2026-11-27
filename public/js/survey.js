@@ -17,31 +17,9 @@
   const STAR = '<svg viewBox="0 0 24 24"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z"/></svg>';
   const starsHtml = (n) => n == null ? '' : `<span class="stars" title="CoStar rating: ${n} of 5 stars" aria-label="CoStar rating ${n} of 5">${[1, 2, 3, 4, 5].map((i) => `<i class="${i <= n ? 'on' : ''}">${STAR}</i>`).join('')}</span>`;
   const yearOf = (b) => b.year_built || null;
-  const money = (n) => '$' + Math.round(n).toLocaleString('en-US');
-  const money2 = (n) => '$' + n.toFixed(2);
-  const nums = (t) => (String(t || '').match(/\d[\d,]*(?:\.\d+)?/g) || []).map((x) => Number(x.replace(/,/g, '')));
-  const isNNN = (s, b) => /\bNNN\b|triple\s*net/i.test(`${s.rent_type || ''} ${s.rent || ''}`) || (!s.rent_type && /triple\s*net|\bNNN\b/i.test(b.service_type || ''));
-  /**
-   * Monthly cost for a suite: (base rent [+ NNN]) x SF / 12. Ranges in rent or SF give a low-high range.
-   * NNN comes from the building's own figure if the broker entered one, otherwise the survey's area estimate.
-   */
-  function monthly(s, b) {
-    const rents = nums(s.rent).filter((n) => n > 0 && n < 500);
-    const sfs = nums(s.sf).filter((n) => n >= 50);
-    if (!rents.length || !sfs.length) return null;
-    const perMonth = /\/\s*mo/i.test(s.rent || '');
-    let rLo = Math.min(...rents), rHi = Math.max(...rents);
-    if (perMonth) { rLo *= 12; rHi *= 12; }
-    let nnn = 0, nnnSource = null;
-    if (isNNN(s, b)) {
-      if (b.nnn_override != null && b.nnn_override !== '') { nnn = Number(b.nnn_override); nnnSource = 'advisor'; }
-      else if (data.survey.nnn_estimate != null && data.survey.nnn_estimate !== '') { nnn = Number(data.survey.nnn_estimate); nnnSource = 'estimate'; }
-      else nnnSource = 'missing';
-    }
-    const lo = (rLo + nnn) * Math.min(...sfs) / 12, hi = (rHi + nnn) * Math.max(...sfs) / 12;
-    return { lo, hi, rLo, rHi, nnn, nnnSource, sfLo: Math.min(...sfs), sfHi: Math.max(...sfs) };
-  }
-  const moneyRange = (m) => Math.round(m.lo) === Math.round(m.hi) ? money(m.lo) : `${money(m.lo)} – ${money(m.hi)}`;
+  const { money, money2 } = window.Cost;
+  const monthly = (s, b) => window.Cost.monthly(s, b, data.survey.nnn_estimate);
+  const moneyRange = (m) => window.Cost.range(m.lo, m.hi);
   function minMonthly(b) {
     const ms = b.suites.map((s) => monthly(s, b)).filter(Boolean);
     if (!ms.length) return null;
@@ -59,6 +37,8 @@
 
   let data = null, map, markers = {}, selected = null, filter = 'all';
   const openNotes = new Set();
+  let activeTab = 'overview';
+  let lb = { items: [], i: 0 };
 
   const state = (b) => (b.vote?.vote === 1 ? 'u' : b.vote?.vote === -1 ? 'd' : 'n');
   const visible = () => data.buildings.filter((b) => filter === 'all' || (filter === 'up' && state(b) === 'u') || (filter === 'down' && state(b) === 'd') || (filter === 'none' && state(b) === 'n'));
@@ -165,6 +145,7 @@
             ${(() => { const m = minMonthly(b); return m ? `<span class="mo">From <b>${money(m.lo)}/mo</b>${m.est ? '<sup title="Includes estimated NNN">*</sup>' : ''}${m.missing ? '<sup title="Base rent only; NNN not included">†</sup>' : ''}</span>` : ''; })()}
           </div>
           ${quickFacts(b) ? `<div class="qf">${esc(quickFacts(b))}</div>` : ''}
+          ${b.tour_url || (b.media || []).some((m) => m.kind === 'photo') || b.floor_plans.length ? `<div class="badges">${b.tour_url ? '<span>▶ Virtual tour</span>' : ''}${(b.media || []).filter((m) => m.kind === 'photo').length ? `<span>📷 ${(b.media || []).filter((m) => m.kind === 'photo').length} photos</span>` : ''}${b.floor_plans.length ? '<span>Floor plans</span>' : ''}</div>` : ''}
           <div class="row"><span class="muted" style="font-size:12px">${starsHtml(b.costar_rating)} ${esc([b.building_class && `Class ${b.building_class}`, b.property_type].filter(Boolean).join(' · '))}</span>${voteButtons(b)}</div>
           ${noteBlock(b, openNotes.has(b.id))}
         </div></li>`;
@@ -209,28 +190,39 @@
     const plansBySuite = (sid) => b.floor_plans.filter((f) => f.suite_id === sid);
     const thumbs = (arr) => arr.length ? `<div class="fp-thumbs">${arr.map((f) => `<button class="fp-thumb" data-src="${f.url}" data-cap="${esc(f.caption || 'Floor plan')}"><img loading="lazy" src="${f.url}" alt=""><span>${esc(f.caption || 'Floor plan')}</span></button>`).join('')}</div>` : '';
     const st = state(b);
-    $('#detailView').innerHTML = `
-      <div class="detail-top">
-        <button class="btn small" id="backBtn">← All buildings</button>
-        <div class="nav"><button class="btn small" ${prev ? `data-go="${prev.id}"` : 'disabled'}>‹ Prev</button><button class="btn small" ${next ? `data-go="${next.id}"` : 'disabled'}>Next ›</button></div>
-      </div>
-      <div class="hero" style="${b.photo_url ? `background-image:url('${b.photo_url}')` : ''}"><span class="num ${st}">${b.ord}</span></div>
-      <div class="dbody">
-        <h2>${esc(b.name || b.address)}</h2>
-        ${b.costar_rating != null ? `<div class="rating-line">${starsHtml(b.costar_rating)}<span class="muted">CoStar rating</span></div>` : ''}
-        <div class="addr">${esc(b.address)}, ${esc(b.city || '')}${b.state ? ', ' + esc(b.state) : ''} ${esc(b.zip || '')}${b.submarket ? `<br><span class="pill">${esc(b.submarket)}</span>` : ''}</div>
-        <div class="vote-panel">
-          <div class="q">Is this building worth a closer look?</div>
-          ${voteButtons(b, true)}
-          ${noteBlock(b, true, true)}
-        </div>
-        ${b.broker_notes ? `<h3 class="sec">Advisor notes</h3><div class="prose"><p>${esc(b.broker_notes).replace(/\n/g, '<br>')}</p></div>` : ''}
+    const photos = (b.media || []).filter((m) => m.kind === 'photo');
+    const flyerPages = (b.media || []).filter((m) => m.kind === 'flyer_page');
+    const pdfs = (b.media || []).filter((m) => m.kind === 'pdf');
+    const allPlans = b.floor_plans.filter((f, i, arr) => arr.findIndex((x) => x.url === f.url) === i); // a plan shared by 2 suites shows once
+    const nMedia = photos.length + allPlans.length + flyerPages.length;
+    const costs = b.suites.map((s) => ({ s, m: monthly(s, b) })).filter((x) => x.m);
+    const tabs = [['overview', 'Overview'], ['suites', `Suites (${b.suites.length})`], ...(costs.length ? [['cost', 'Monthly cost']] : []), ...(nMedia ? [['media', `Photos & plans (${nMedia})`]] : [])];
+    if (!tabs.some(([k]) => k === activeTab)) activeTab = 'overview';
+    const gallery = (items, cls = '') => `<div class="gallery ${cls}">${items.map((m, i) => `<button class="g-item" data-gal="${cls}" data-i="${i}" data-src="${m.url}" data-cap="${esc(m.caption || '')}"><img loading="lazy" src="${m.url}" alt="${esc(m.caption || '')}">${m.caption ? `<span>${esc(m.caption)}</span>` : ''}</button>`).join('')}</div>`;
+
+    const costNotes = () => {
+      const ms = costs.map((x) => x.m); const notes = [];
+      if (ms.some((m) => m.nnnSource === 'estimate')) notes.push(`* NNN charges (taxes, insurance, common area) are an <b>estimate only</b> of ${money2(Number(data.survey.nnn_estimate))}/SF/yr for this area, not a figure quoted by the landlord. Actual NNN for this building may differ.`);
+      if (ms.some((m) => m.nnnSource === 'advisor')) notes.push(`NNN of ${money2(Number(b.nnn_override))}/SF/yr provided by your advisor for this building.`);
+      if (ms.some((m) => m.nnnSource === 'missing')) notes.push('† This space is quoted triple net (NNN); taxes, insurance and common area charges are extra and not included here.');
+      notes.push('Estimates before concessions, escalations and any utilities not included in the rent.');
+      return `<div class="cost-notes">${notes.map((n) => `<p>${n}</p>`).join('')}</div>`;
+    };
+    const suiteLabel = (s) => [s.suite ? `Suite ${s.suite}` : null, s.floor ? `${s.floor} floor` : null].filter(Boolean).join(' · ') || 'Space';
+    const sfRange = (m) => (m.sfLo === m.sfHi ? fmtInt(m.sfLo) : `${fmtInt(m.sfLo)}–${fmtInt(m.sfHi)}`);
+
+    const panes = {
+      overview: `
+        ${b.broker_notes ? `<h3 class="sec">Advisor notes</h3><div class="prose advisor"><p>${esc(b.broker_notes).replace(/\n/g, '<br>')}</p></div>` : ''}
         <h3 class="sec">Property details</h3>
         <dl class="specs">${detailRows(b)}</dl>
-        <h3 class="sec">Available suites (${b.suites.length})</h3>
-        ${b.suites.length ? b.suites.map((s) => `
-          <div class="suite">
-            <div class="top"><span class="label">${esc([s.suite ? `Suite ${s.suite}` : null, s.floor ? `${s.floor} floor` : null].filter(Boolean).join(' · ') || 'Space')}</span><span class="sf">${esc(s.sf || '')}${s.sf ? ' SF' : ''}</span></div>
+        ${b.highlights?.length ? `<h3 class="sec">Highlights</h3><div class="prose"><ul>${b.highlights.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
+        ${b.overview ? `<h3 class="sec">About the property</h3><div class="prose">${b.overview.split(/\n\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>` : ''}`,
+      suites: b.suites.length ? b.suites.map((s) => {
+        const m = monthly(s, b);
+        const plans = b.floor_plans.filter((f) => f.suite_id === s.id);
+        return `<div class="suite">
+            <div class="top"><span class="label">${esc(suiteLabel(s))}</span><span class="sf">${esc(s.sf || '')}${s.sf ? ' SF' : ''}</span></div>
             <div class="meta">
               ${s.address ? `<span>${esc(s.address)}</span>` : ''}
               <span>Rent <b>${esc(s.rent || '—')}${s.rent_type ? ' ' + esc(s.rent_type) : ''}</b></span>
@@ -241,24 +233,52 @@
               ${s.floor_status ? `<span>${esc(s.floor_status)} floor</span>` : ''}
             </div>
             ${s.notes ? `<ul class="suite-notes">${s.notes.split('\n').filter(Boolean).map((n) => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
-            ${(() => { const m = monthly(s, b); if (!m) return ''; return `<div class="monthly"><span>Est. monthly <b>${moneyRange(m)}</b></span>
-              <span class="calc">${(() => { const base = m.rLo === m.rHi ? money2(m.rLo) : `${money2(m.rLo)}–${money2(m.rHi)}`;
-                const rate = m.nnnSource === 'advisor' ? `(${base} rent + ${money2(m.nnn)} NNN)` : m.nnnSource === 'estimate' ? `(${base} rent + ${money2(m.nnn)} est. NNN*)` : m.nnnSource === 'missing' ? `${base} rent (+ NNN, not included†)` : `${base} rent`;
-                return `${rate}/SF/yr × ${m.sfLo === m.sfHi ? fmtInt(m.sfLo) : `${fmtInt(m.sfLo)}–${fmtInt(m.sfHi)}`} SF ÷ 12`; })()}</span></div>`; })()}
-            ${thumbs(plansBySuite(s.id))}
-          </div>`).join('') : '<p class="muted">Contact your advisor for suite details.</p>'}
-        ${(() => {
-          const ms = b.suites.map((s) => monthly(s, b)).filter(Boolean);
-          const notes = [];
-          if (ms.some((m) => m.nnnSource === 'estimate')) notes.push(`* NNN charges (taxes, insurance, common area) are an <b>estimate only</b> of ${money2(Number(data.survey.nnn_estimate))}/SF/yr for this area, not a figure quoted by the landlord. Actual NNN for this building may differ.`);
-          if (ms.some((m) => m.nnnSource === 'advisor')) notes.push(`NNN of ${money2(Number(b.nnn_override))}/SF/yr provided by your advisor for this building.`);
-          if (ms.some((m) => m.nnnSource === 'missing')) notes.push('† This space is quoted triple net (NNN); taxes, insurance and common area charges are extra and not included in the monthly figure.');
-          if (ms.length) notes.push('Monthly figures are base rent estimates before any concessions, escalations or utilities not included in the rent.');
-          return notes.length ? `<div class="cost-notes">${notes.map((n) => `<p>${n}</p>`).join('')}</div>` : '';
-        })()}
-        ${plansBySuite(null).length ? `<h3 class="sec">Floor plans</h3>${thumbs(plansBySuite(null))}` : ''}
-        ${b.highlights?.length ? `<h3 class="sec">Highlights</h3><div class="prose"><ul>${b.highlights.map((h) => `<li>${esc(h)}</li>`).join('')}</ul></div>` : ''}
-        ${b.overview ? `<h3 class="sec">About the property</h3><div class="prose">${b.overview.split(/\n\n+/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>` : ''}
+            ${m ? `<div class="monthly"><span>Est. monthly <b>${moneyRange(m)}</b>${m.nnnSource === 'estimate' ? '<sup>*</sup>' : m.nnnSource === 'missing' ? '<sup>†</sup>' : ''}</span><button class="linkbtn" data-tab="cost">See cost breakdown</button></div>` : ''}
+            ${plans.length ? gallery(plans.map((f) => ({ url: f.url, caption: f.caption || 'Floor plan' })), 'plans-s' + s.id) : ''}
+          </div>`;
+      }).join('') + (costs.length ? costNotes() : '') : '<p class="muted">Contact your advisor for suite details.</p>',
+      cost: `
+        <p class="muted" style="margin:0 0 10px;font-size:12.5px">Estimated monthly and annual occupancy cost for each available space.</p>
+        <div class="cost-table-wrap"><table class="cost-table">
+          <thead><tr><th>Space</th><th class="r">SF</th><th class="r">Rent<br><small>$/SF/yr</small></th><th class="r">NNN<br><small>$/SF/yr</small></th><th class="r">Total<br><small>$/SF/yr</small></th><th class="r">Monthly<br><small>annual</small></th></tr></thead>
+          <tbody>${costs.map(({ s, m }) => `<tr>
+            <td>${esc(s.suite ? `Suite ${s.suite}` : suiteLabel(s))}${s.rent_type ? ` <small class="muted">${esc(s.rent_type)}</small>` : ''}</td>
+            <td class="r">${sfRange(m)}</td>
+            <td class="r">${window.Cost.range(m.rLo, m.rHi, money2)}</td>
+            <td class="r">${m.nnnSource === 'advisor' ? money2(m.nnn) : m.nnnSource === 'estimate' ? `${money2(m.nnn)}<sup>*</sup>` : m.nnnSource === 'missing' ? '<span class="muted">extra†</span>' : '<span class="muted">incl.</span>'}</td>
+            <td class="r">${window.Cost.range(m.rLo + m.nnn, m.rHi + m.nnn, money2)}</td>
+            <td class="r"><b>${moneyRange(m)}</b><br><small class="muted">${window.Cost.range(m.lo * 12, m.hi * 12)}/yr</small></td></tr>`).join('')}</tbody>
+        </table></div>
+        ${b.suites.length > costs.length ? `<p class="muted" style="font-size:12px">${b.suites.length - costs.length} space(s) not shown: rent not disclosed.</p>` : ''}
+        ${costNotes()}`,
+      media: `
+        ${photos.length ? `<h3 class="sec">Photos (${photos.length})</h3>${gallery(photos, 'photos')}` : ''}
+        ${allPlans.length ? `<h3 class="sec">Floor plans (${allPlans.length})</h3>${gallery(allPlans.map((f) => ({ url: f.url, caption: f.caption || 'Floor plan' })), 'plans')}` : ''}
+        ${flyerPages.length ? `<h3 class="sec">Flyer</h3>${gallery(flyerPages, 'flyer')}` : ''}
+        ${pdfs.length ? `<div class="downloads">${pdfs.map((d) => `<a class="btn small" href="${d.url}" target="_blank" rel="noopener">📄 ${esc(d.caption || 'Flyer')} (PDF)</a>`).join('')}</div>` : ''}`,
+    };
+
+    $('#detailView').innerHTML = `
+      <div class="detail-top">
+        <button class="btn small" id="backBtn">← All buildings</button>
+        <div class="nav"><button class="btn small" ${prev ? `data-go="${prev.id}"` : 'disabled'}>‹ Prev</button><button class="btn small" ${next ? `data-go="${next.id}"` : 'disabled'}>Next ›</button></div>
+      </div>
+      <div class="hero" style="${b.photo_url ? `background-image:url('${b.photo_url}')` : ''}" ${photos.length ? 'data-tab="media" title="See all photos"' : ''}><span class="num ${st}">${b.ord}</span>${photos.length ? `<span class="hero-count">📷 ${photos.length}</span>` : ''}</div>
+      <div class="dbody">
+        <h2>${esc(b.name || b.address)}</h2>
+        ${b.costar_rating != null ? `<div class="rating-line">${starsHtml(b.costar_rating)}<span class="muted">CoStar rating</span></div>` : ''}
+        <div class="addr">${esc(b.address)}, ${esc(b.city || '')}${b.state ? ', ' + esc(b.state) : ''} ${esc(b.zip || '')}${b.submarket ? `<br><span class="pill">${esc(b.submarket)}</span>` : ''}</div>
+        ${b.tour_url || pdfs.length ? `<div class="quick-links">
+          ${b.tour_url ? `<a class="btn small tour" href="${esc(b.tour_url)}" target="_blank" rel="noopener">▶ Virtual tour</a>` : ''}
+          ${pdfs.map((d) => `<a class="btn small" href="${d.url}" target="_blank" rel="noopener">📄 Flyer</a>`).join('')}
+        </div>` : ''}
+        <div class="vote-panel">
+          <div class="q">Is this building worth a closer look?</div>
+          ${voteButtons(b, true)}
+          ${noteBlock(b, true, true)}
+        </div>
+        <div class="tabs" role="tablist">${tabs.map(([k, l]) => `<button role="tab" class="tab ${k === activeTab ? 'on' : ''}" data-tab="${k}" aria-selected="${k === activeTab}">${l}</button>`).join('')}</div>
+        ${tabs.map(([k]) => `<section class="pane" data-pane="${k}" ${k === activeTab ? '' : 'hidden'}>${panes[k]}</section>`).join('')}
       </div>`;
     $('#listView').hidden = true;
     $('#detailView').hidden = false;
@@ -328,8 +348,20 @@
     if (e.target.id === 'backBtn') return closeDetail();
     const go = e.target.closest('[data-go]');
     if (go) return openDetail(Number(go.dataset.go));
-    const fp = e.target.closest('.fp-thumb');
-    if (fp) { $('#lbImg').src = fp.dataset.src; $('#lbCap').textContent = fp.dataset.cap; $('#lightbox').hidden = false; return; }
+    const tab = e.target.closest('[data-tab]');
+    if (tab) {
+      activeTab = tab.dataset.tab;
+      document.querySelectorAll('#detailView .tab').forEach((t) => { const on = t.dataset.tab === activeTab; t.classList.toggle('on', on); t.setAttribute('aria-selected', on); });
+      document.querySelectorAll('#detailView .pane').forEach((p) => { p.hidden = p.dataset.pane !== activeTab; });
+      document.querySelector('#detailView .tabs')?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      return;
+    }
+    const g = e.target.closest('.g-item');
+    if (g) {
+      lb.items = [...document.querySelectorAll(`.g-item[data-gal="${g.dataset.gal}"]`)].map((x) => ({ src: x.dataset.src, cap: x.dataset.cap }));
+      lb.i = Number(g.dataset.i); showLb(); return;
+    }
+    if (e.target.closest('.lb-nav')) { lb.i = (lb.i + (e.target.closest('.lb-nav').classList.contains('next') ? 1 : -1) + lb.items.length) % lb.items.length; showLb(); return; }
     if (e.target.closest('#lightbox')) { $('#lightbox').hidden = true; return; }
     const f = e.target.closest('#filters button');
     if (f) { filter = f.dataset.f; renderList(); }
@@ -345,7 +377,14 @@
     document.querySelectorAll('.pin.hover').forEach((p) => p.classList.remove('hover'));
     if (card && markers[card.dataset.id]) markers[card.dataset.id].openTooltip();
   });
+  function showLb() {
+    const it = lb.items[lb.i]; if (!it) return;
+    $('#lbImg').src = it.src; $('#lbCap').textContent = `${it.cap || ''}${lb.items.length > 1 ? `  (${lb.i + 1} of ${lb.items.length})` : ''}`;
+    document.querySelectorAll('.lb-nav').forEach((n) => { n.hidden = lb.items.length < 2; });
+    $('#lightbox').hidden = false;
+  }
   document.addEventListener('keydown', (e) => {
+    if (!$('#lightbox').hidden && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { lb.i = (lb.i + (e.key === 'ArrowRight' ? 1 : -1) + lb.items.length) % lb.items.length; showLb(); return; }
     if (e.key === 'Escape') { if (!$('#lightbox').hidden) $('#lightbox').hidden = true; else if (selected) closeDetail(); }
   });
 
